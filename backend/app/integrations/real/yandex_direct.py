@@ -83,17 +83,24 @@ def _error_detail(resp: httpx.Response) -> str:
     return snippet or f"HTTP {resp.status_code}"
 
 
-def _report(body: dict, fields: list[str]) -> list[dict]:
+def _report(
+    body: dict,
+    fields: list[str],
+    oauth_token: str | None = None,
+    direct_login: str | None = None,
+) -> list[dict]:
+    token = oauth_token if oauth_token is not None else settings.yandex_oauth_token
+    login = direct_login if direct_login is not None else settings.yandex_direct_login
     headers = {
-        "Authorization": f"Bearer {settings.yandex_oauth_token}",
+        "Authorization": f"Bearer {token}",
         "Accept-Language": "ru",
         "processingMode": "auto",
         "returnMoneyInMicros": "false",
         "skipReportHeader": "true",   # без строки названия отчёта — сразу заголовки колонок
         "skipReportSummary": "true",  # без строки «Total rows»
     }
-    if settings.yandex_direct_login:
-        headers["Client-Login"] = settings.yandex_direct_login
+    if login:
+        headers["Client-Login"] = login
 
     # Тяжёлые отчёты (напр. по поисковым запросам) Яндекс формирует офлайн: возвращает
     # 201/202 с retryIn и ставит в очередь. Ждём генерацию до _REPORT_DEADLINE секунд,
@@ -114,6 +121,15 @@ def _report(body: dict, fields: list[str]) -> list[dict]:
 
 
 class RealYandexDirectAdapter:
+    def __init__(self, oauth_token: str | None = None, direct_login: str | None = None) -> None:
+        self.oauth_token = oauth_token
+        self.direct_login = direct_login
+
+    def _report(self, body: dict, fields: list[str]) -> list[dict]:
+        if self.oauth_token is None and self.direct_login is None:
+            return _report(body, fields)
+        return _report(body, fields, self.oauth_token, self.direct_login)
+
     def fetch_channels(self) -> list[dict]:
         """Статистика кампаний по дням (строка = кампания × дата).
 
@@ -133,7 +149,7 @@ class RealYandexDirectAdapter:
             "IncludeVAT": "YES",
             "IncludeDiscount": "NO",
         }}
-        rows = _report(body, fields)
+        rows = self._report(body, fields)
         return [{
             "date": r.get("Date") or None,
             "campaign_id": r.get("CampaignId", ""),
@@ -156,7 +172,7 @@ class RealYandexDirectAdapter:
             "IncludeVAT": "YES",
             "IncludeDiscount": "NO",
         }}
-        rows = _report(body, fields)
+        rows = self._report(body, fields)
         return [{
             "phrase": r.get("Query", ""),
             "camp": r.get("CampaignName", ""),

@@ -60,11 +60,27 @@ def parse_visits(payload: dict) -> list[dict]:
 
 
 class RealYandexMetrikaAdapter:
+    def __init__(
+        self, oauth_token: str | None = None, counter_id: str | None = None
+    ) -> None:
+        self.oauth_token = oauth_token
+        self.counter_id = counter_id
+
     def fetch_visits(self) -> list[dict]:
-        if not str(settings.yandex_metrika_counter_id or "").strip():
+        counter_id = (
+            self.counter_id
+            if self.counter_id is not None
+            else settings.yandex_metrika_counter_id
+        )
+        oauth_token = (
+            self.oauth_token
+            if self.oauth_token is not None
+            else settings.yandex_oauth_token
+        )
+        if not str(counter_id or "").strip():
             raise RuntimeError("Яндекс Метрика: не задан номер счётчика")
         params = {
-            "ids": settings.yandex_metrika_counter_id,
+            "ids": counter_id,
             "metrics": "ym:s:visits",
             "dimensions": "ym:s:date,ym:s:lastsignTrafficSource",
             # Окно шире максимального периода дашборда (квартал) — иначе при
@@ -73,7 +89,7 @@ class RealYandexMetrikaAdapter:
             "date2": "today",
             "limit": 10000,
         }
-        headers = {"Authorization": f"OAuth {settings.yandex_oauth_token}"}
+        headers = {"Authorization": f"OAuth {oauth_token}"}
         with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
             resp = request("GET", STAT_URL, client=client, params=params, headers=headers)
         # 4xx (неверный счётчик, нет прав к счётчику) request() не ретраит и

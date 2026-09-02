@@ -8,8 +8,8 @@ import { useFilters } from "@/state/filters";
 
 export default function AnalyticsPage() {
   const f = useFilters();
-  const chain = useChain(f.period);
-  const channels = useChannels(f.channel, f.period);
+  const chain = useChain(f.period, f.legalEntity);
+  const channels = useChannels(f.channel, f.period, f.legalEntity);
 
   return (
     <>
@@ -32,7 +32,7 @@ export default function AnalyticsPage() {
         ) : (
           <EmptyState
             title="Нет данных по каналам"
-            hint="Сводка по каналам собирается из расходов Яндекс Директа и выручки Битрикс24/МойСклад. Подключите источники и выполните пересчёт."
+            hint="Сводка по каналам собирается из расходов Яндекс Директа и фактических поступлений 1С. Подключите источники и выполните пересчёт."
           />
         )}
       </div>

@@ -77,10 +77,10 @@ export default function MonitorPage() {
     setParams(sev === key ? {} : { sev: key });
   };
 
-  const onTask = (ref: string) => {
-    createTask.mutate(ref, {
+  const onTask = (dealKey: string) => {
+    createTask.mutate(dealKey, {
       onSuccess: (res) => {
-        setDone((prev) => new Set(prev).add(ref));
+        setDone((prev) => new Set(prev).add(dealKey));
         // В демо-режиме в портал ничего не уходит — не выдаём это за созданную задачу.
         if (res.mock) {
           message.warning(
@@ -159,7 +159,7 @@ export default function MonitorPage() {
                 v={v}
                 onTask={onTask}
                 taskPending={createTask.isPending}
-                taskDone={done.has(v.ref)}
+                taskDone={done.has(v.deal_key)}
               />
             ))
           ) : (

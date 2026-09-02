@@ -19,10 +19,10 @@ const PERIODS = [
 // Какие контролы фильтров релевантны на каждой странице. На страницах, которых
 // нет в конфиге (ROMI, AI, Мониторинг, Интеграции, Админ), панель не показывается —
 // эти разделы не используют фильтры.
-type Control = "period" | "channel" | "mgr" | "source";
+type Control = "period" | "legalEntity" | "channel" | "mgr" | "source";
 const PAGE_FILTERS: Record<string, Control[]> = {
-  "/dashboard": ["period", "mgr", "source"],
-  "/analytics": ["period", "channel"],
+  "/dashboard": ["period", "legalEntity", "mgr", "source"],
+  "/analytics": ["period", "legalEntity", "channel"],
 };
 
 const ISO = "YYYY-MM-DD";
@@ -142,6 +142,17 @@ export function FilterBar() {
         </div>
       ) : null}
       <div className="spacer" />
+      {controls.includes("legalEntity") ? (
+        <Select
+          className="fb-select"
+          value={f.legalEntity}
+          onChange={(value) => { f.setLegalEntity(value); f.setLeadFilter(null); }}
+          options={[
+            { value: "all", label: "Все юрлица" },
+            ...(o.data?.legal_entities ?? []),
+          ]}
+        />
+      ) : null}
       {controls.includes("channel") ? (
         <Select
           className="fb-select"

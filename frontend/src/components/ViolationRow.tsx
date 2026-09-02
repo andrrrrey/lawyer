@@ -47,7 +47,7 @@ export function ViolationRow({ v, onTask, taskPending, taskDone }: Props) {
           {taskDone ? (
             <Tag color="success">✓ Задача поставлена</Tag>
           ) : (
-            <Button type="primary" size="small" loading={taskPending} onClick={() => onTask(v.ref)}>
+            <Button type="primary" size="small" loading={taskPending} onClick={() => onTask(v.deal_key)}>
               Поставить задачу
             </Button>
           )}

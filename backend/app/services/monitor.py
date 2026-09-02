@@ -65,7 +65,9 @@ async def review(session: AsyncSession) -> list[dict]:
     return _with_amount_display(res["review"])
 
 
-async def create_task_for(session: AsyncSession, ref: str) -> dict:
+async def create_task_for(
+    session: AsyncSession, ref: str | None = None, deal_key: str | None = None
+) -> dict:
     """Ставит задачу ответственному по сделке (по согласованной логике)."""
     # Доступы и режим источника данных сохраняются через UI в БД, а процессов
     # API несколько (gunicorn workers): тот, который не обрабатывал сохранение,
@@ -74,9 +76,22 @@ async def create_task_for(session: AsyncSession, ref: str) -> dict:
     from app.services.integrations_config import apply_overrides_from_db
     await apply_overrides_from_db(session)
 
-    deal = (await session.execute(
-        select(Deal).options(selectinload(Deal.tasks)).where(Deal.ref == ref)
-    )).scalar_one_or_none()
+    stmt = select(Deal).options(selectinload(Deal.tasks))
+    if deal_key:
+        try:
+            crm_source, entity_type, external_id = deal_key.split(":", 2)
+        except ValueError as exc:
+            raise ValueError("Некорректный идентификатор сделки") from exc
+        stmt = stmt.where(
+            Deal.crm_source == crm_source,
+            Deal.entity_type == entity_type,
+            Deal.external_id == external_id,
+        )
+    elif ref:
+        stmt = stmt.where(Deal.ref == ref)
+    else:
+        raise ValueError("Не указан идентификатор сделки")
+    deal = (await session.execute(stmt)).scalars().first()
     if deal is None:
         raise ValueError("Сделка не найдена")
 
@@ -86,7 +101,8 @@ async def create_task_for(session: AsyncSession, ref: str) -> dict:
     # Постановка в Битрикс24. Ошибка адаптера (нет ответственного, отказ портала,
     # сеть) пробрасывается наверх — локальную задачу при этом НЕ фиксируем, чтобы
     # интерфейс не показывал ложный успех, когда в Битриксе задача не создана.
-    result = await run_in_threadpool(factory.get_bitrix24().create_task, {
+    adapter = factory.get_bitrix24_connection(deal.crm_source)
+    result = await run_in_threadpool(adapter.create_task, {
         "deal_ref": deal.ref, "deal_external_id": deal.external_id,
         "title": params["title"], "assignee": params["assignee"],
         "assignee_id": params["assignee_id"], "due_at": params["due_at"],

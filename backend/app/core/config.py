@@ -35,9 +35,28 @@ class Settings(BaseSettings):
     # --- Интеграции (Этап E) ---
     bitrix24_webhook_url: str = ""
     bitrix24_inbound_token: str = ""
+    bitrix_box_webhook_url: str = ""
+    bitrix_box_inbound_token: str = ""
+    bitrix_cloud_webhook_url: str = ""
+    bitrix_cloud_inbound_token: str = ""
     yandex_oauth_token: str = ""
     yandex_direct_login: str = ""
     yandex_metrika_counter_id: str = ""
+    yandex_uo_oauth_token: str = ""
+    yandex_uo_direct_login: str = ""
+    yandex_uo_metrika_counter_id: str = ""
+    yandex_csv_oauth_token: str = ""
+    yandex_csv_direct_login: str = ""
+    yandex_csv_metrika_counter_id: str = ""
+    yandex_urpase_oauth_token: str = ""
+    yandex_urpase_direct_login: str = ""
+    yandex_urpase_metrika_counter_id: str = ""
+    # 1С:УНФ: HTTP-сервис из ТЗ с Basic Authentication.
+    onec_endpoint: str = ""
+    onec_username: str = ""
+    onec_password: str = ""
+    # Устаревшие интеграции оставлены в конфиге только для совместимости со
+    # старыми установками; в интерфейсе Lawyer они не показываются.
     calltouch_site_id: str = ""
     calltouch_client_api_id: str = ""
     moysklad_token: str = ""

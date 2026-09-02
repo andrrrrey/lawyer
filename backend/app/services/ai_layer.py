@@ -168,7 +168,7 @@ async def generate_budget_recs(session: AsyncSession) -> dict:
         'Проверить, Ограничить), "text" (рекомендация), "why" (как найдено), '
         '"impact" (эффект), "sources" (массив источников), '
         '"confidence" (высокая|средняя|низкая), "dep" (true, если нужна связка '
-        "с МойСклад). Только JSON."
+        "с фактическими поступлениями 1С). Только JSON."
     )
 
     raw = client.complete(system, user)  # синхронный вызов LLM

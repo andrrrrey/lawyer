@@ -21,21 +21,27 @@ logger = get_logger("lawyer.integrations")
 _PAGE = 50
 
 
-def _base() -> str:
-    if not settings.bitrix24_webhook_url:
+def _base(webhook_url: str | None = None) -> str:
+    url = webhook_url if webhook_url is not None else settings.bitrix24_webhook_url
+    if not url:
         raise RuntimeError("BITRIX24_WEBHOOK_URL не задан")
-    return settings.bitrix24_webhook_url.rstrip("/")
+    return url.rstrip("/")
 
 
-def _call(method: str, params: dict | None = None) -> list[dict]:
+def _call(
+    method: str, params: dict | None = None, webhook_url: str | None = None
+) -> list[dict]:
     """Вызывает REST-метод с постраничной выгрузкой (envelope result/next/total)."""
     out: list[dict] = []
     start = 0
+    base = _base() if webhook_url is None else _base(webhook_url)
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         while True:
             payload = dict(params or {})
             payload["start"] = start
-            resp = request("POST", f"{_base()}/{method}.json", client=client, json=payload)
+            resp = request(
+                "POST", f"{base}/{method}.json", client=client, json=payload
+            )
             data = resp.json()
             result = data.get("result", [])
             if isinstance(result, dict):  # некоторые методы возвращают объект
@@ -49,14 +55,17 @@ def _call(method: str, params: dict | None = None) -> list[dict]:
     return out
 
 
-def _rest(method: str, payload: dict) -> Any:
+def _rest(method: str, payload: dict, webhook_url: str | None = None) -> Any:
     """Одиночный REST-вызов с проверкой конверта ошибки.
 
     Битрикс24 отвечает HTTP 200 и при отказе (ошибка лежит в теле), поэтому без
     разбора конверта интерфейс показывал бы успех на несозданной задаче.
     """
+    base = _base() if webhook_url is None else _base(webhook_url)
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
-        resp = request("POST", f"{_base()}/{method}.json", client=client, json=payload)
+        resp = request(
+            "POST", f"{base}/{method}.json", client=client, json=payload
+        )
     try:
         data = resp.json()
     except ValueError as exc:
@@ -104,6 +113,7 @@ def normalize_deal(raw: dict, extra_fields: dict[str, str] | None = None) -> dic
         "ref": f"Сделка #{deal_id}" if deal_id is not None else "",
         "name": raw.get("TITLE") or raw.get("NAME") or "Без названия",
         "stage": raw.get("STAGE_ID"),
+        "funnel_id": str(raw.get("CATEGORY_ID") or "0"),
         # Семантика стадии Битрикс: P — в работе, S — успех, F — провал/отказ.
         "semantic": raw.get("STAGE_SEMANTIC_ID"),
         "mgr": raw.get("ASSIGNED_BY_ID"),  # id; резолв имени — на этапе настройки
@@ -119,6 +129,24 @@ def normalize_deal(raw: dict, extra_fields: dict[str, str] | None = None) -> dic
 
 
 class RealBitrix24Adapter:
+    def __init__(self, webhook_url: str | None = None, source_key: str = "primary") -> None:
+        self.webhook_url = webhook_url
+        self.source_key = source_key
+
+    def _call(self, method: str, params: dict | None = None) -> list[dict]:
+        # Два аргумента сохраняют совместимость тестов, подменяющих модульную функцию.
+        if self.webhook_url is None:
+            return _call(method, params)
+        return _call(method, params, self.webhook_url)
+
+    def _rest(self, method: str, payload: dict) -> Any:
+        if self.webhook_url is None:
+            return _rest(method, payload)
+        return _rest(method, payload, self.webhook_url)
+
+    def _base(self) -> str:
+        return _base(self.webhook_url)
+
     def fetch_deals(
         self, created_after: str | None = None, extra_fields: dict[str, str] | None = None,
         modified_after: str | None = None,
@@ -130,7 +158,7 @@ class RealBitrix24Adapter:
         для частой синхронизации, чтобы не тянуть всё окно каждые несколько минут.
         """
         select = [
-            "ID", "TITLE", "STAGE_ID", "STAGE_SEMANTIC_ID", "ASSIGNED_BY_ID",
+            "ID", "TITLE", "CATEGORY_ID", "STAGE_ID", "STAGE_SEMANTIC_ID", "ASSIGNED_BY_ID",
             "CONTACT_ID", "SOURCE_ID", "OPPORTUNITY", "DATE_CREATE", "DATE_MODIFY",
             "LAST_ACTIVITY_TIME", "UTM_SOURCE", "UTM_CAMPAIGN",
         ]
@@ -145,13 +173,18 @@ class RealBitrix24Adapter:
         elif created_after:
             params["filter"] = {">=DATE_CREATE": created_after}
             params["order"] = {"DATE_CREATE": "DESC"}
-        raw = _call("crm.deal.list", params)
-        return [normalize_deal(d, extra_fields) for d in raw]
+        raw = self._call("crm.deal.list", params)
+        rows = [normalize_deal(d, extra_fields) for d in raw]
+        for row in rows:
+            row["crm_source"] = self.source_key
+        return rows
 
     def fetch_deal_fields(self) -> list[dict]:
         """Список полей сделки: [{"code","title"}] (вкл. пользовательские UF_CRM_*)."""
         with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
-            resp = request("POST", f"{_base()}/crm.deal.fields.json", client=client, json={})
+            resp = request(
+                "POST", f"{self._base()}/crm.deal.fields.json", client=client, json={}
+            )
         result = resp.json().get("result", {})
         out: list[dict] = []
         for code, meta in (result.items() if isinstance(result, dict) else []):
@@ -160,11 +193,11 @@ class RealBitrix24Adapter:
         return out
 
     def fetch_stage_history(self) -> list[dict]:
-        return _call("crm.stagehistory.list", {"entityTypeId": 2})
+        return self._call("crm.stagehistory.list", {"entityTypeId": 2})
 
     def fetch_users(self) -> list[dict]:
         """Справочник сотрудников портала: [{"id", "name"}] для резолва ID → ФИО."""
-        raw = _call("user.get", {})
+        raw = self._call("user.get", {})
         out: list[dict] = []
         for u in raw:
             uid = u.get("ID") or u.get("id")
@@ -182,7 +215,7 @@ class RealBitrix24Adapter:
         справочники портала (стадии, источники, типы), и без фильтра STATUS_ID
         источника мог перекрыть одноимённый код стадии.
         """
-        raw = _call("crm.status.list", {})
+        raw = self._call("crm.status.list", {})
         out: list[dict] = []
         for s in raw:
             sid = s.get("STATUS_ID")
@@ -197,7 +230,7 @@ class RealBitrix24Adapter:
 
         Без него на дашборде источник сделки показывается служебным кодом портала
         («site», «CALL»), по которому фильтр не читается."""
-        raw = _call("crm.status.list", {})
+        raw = self._call("crm.status.list", {})
         out: list[dict] = []
         for s in raw:
             sid = s.get("STATUS_ID")
@@ -212,14 +245,14 @@ class RealBitrix24Adapter:
         после последнего пересчёта, а исполнителем задачи должен стать тот, кто
         отвечает за сделку сейчас.
         """
-        result = _rest("crm.deal.get", {"id": deal_id})
+        result = self._rest("crm.deal.get", {"id": deal_id})
         if isinstance(result, dict):
             return _user_id(result.get("ASSIGNED_BY_ID"))
         return ""
 
     def fetch_user_name(self, user_id: str) -> str:
         """ФИО сотрудника по ID (для подтверждения в интерфейсе); «» — если не найден."""
-        result = _rest("user.get", {"ID": user_id})
+        result = self._rest("user.get", {"ID": user_id})
         rows = result if isinstance(result, list) else []
         for u in rows:
             parts = [u.get("NAME"), u.get("LAST_NAME")]
@@ -250,7 +283,7 @@ class RealBitrix24Adapter:
                 start = 0
                 while True:
                     resp = request(
-                        "POST", f"{_base()}/crm.contact.list.json", client=client,
+                        "POST", f"{self._base()}/crm.contact.list.json", client=client,
                         json={"filter": {"@ID": batch}, "select": ["ID", "PHONE"], "start": start},
                     )
                     data = resp.json()
@@ -266,7 +299,7 @@ class RealBitrix24Adapter:
         return phones
 
     def fetch_tasks(self) -> list[dict]:
-        return _call("tasks.task.list", {})
+        return self._call("tasks.task.list", {})
 
     def fetch_open_action_deal_ids(self, deal_ids: list[str]) -> set[str]:
         """external_id сделок, у которых есть открытая задача или дело в Битрикс24.
@@ -290,7 +323,7 @@ class RealBitrix24Adapter:
             ids = sorted(wanted)
             for i in range(0, len(ids), 50):
                 batch = ids[i:i + 50]
-                rows = _call("crm.activity.list", {
+                rows = self._call("crm.activity.list", {
                     "filter": {"OWNER_TYPE_ID": 2, "COMPLETED": "N", "@OWNER_ID": batch},
                     "select": ["ID", "OWNER_ID"],
                 })
@@ -326,7 +359,7 @@ class RealBitrix24Adapter:
         start = 0
         with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
             while True:
-                resp = request("POST", f"{_base()}/tasks.task.list.json", client=client, json={
+                resp = request("POST", f"{self._base()}/tasks.task.list.json", client=client, json={
                     "filter": {"!STATUS": 5}, "select": ["ID", "UF_CRM_TASK"], "start": start,
                 })
                 data = resp.json()
@@ -380,7 +413,7 @@ class RealBitrix24Adapter:
         if deadline:
             fields["DEADLINE"] = deadline
 
-        result = _rest("tasks.task.add", {"fields": fields})
+        result = self._rest("tasks.task.add", {"fields": fields})
         task = result.get("task", {}) if isinstance(result, dict) else {}
         task_id = task.get("id")
         if not task_id:
@@ -417,7 +450,7 @@ class RealBitrix24Adapter:
             params["description"] = description
         if deadline:
             params["deadline"] = deadline
-        result = _rest("crm.activity.todo.add", params)
+        result = self._rest("crm.activity.todo.add", params)
         if isinstance(result, dict):
             return str(result.get("id") or "") or None
         return str(result) if result else None

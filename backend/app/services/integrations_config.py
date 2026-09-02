@@ -43,13 +43,13 @@ class Provider:
 
 PROVIDERS: list[Provider] = [
     Provider(
-        key="bitrix24",
-        name="Битрикс24",
-        subtitle="CRM: сделки, история этапов, задачи",
+        key="bitrix_box",
+        name="Bitrix24 · коробочная версия",
+        subtitle="Первый источник CRM; воронки распределяются в настройках",
         docs="Портал → «Разработчикам» → «Другое» → «Входящий вебхук»",
         fields=[
             Field(
-                "bitrix24_webhook_url",
+                "bitrix_box_webhook_url",
                 "URL входящего вебхука",
                 "Права на чтение CRM и запись задач. Пример: "
                 "https://<portal>.bitrix24.ru/rest/1/<код>/",
@@ -57,7 +57,7 @@ PROVIDERS: list[Provider] = [
                 placeholder="https://<portal>.bitrix24.ru/rest/1/<код>/",
             ),
             Field(
-                "bitrix24_inbound_token",
+                "bitrix_box_inbound_token",
                 "Токен исходящих вебхуков",
                 "Необязательно. Нужен только если настраиваете «Исходящий вебхук» "
                 "Битрикс24 (push событий): URL обработчика в Битрикс — "
@@ -68,83 +68,90 @@ PROVIDERS: list[Provider] = [
         ],
     ),
     Provider(
-        key="yandex_direct",
-        name="Яндекс Директ",
-        subtitle="Расход, клики, показы, поисковые запросы",
-        docs="oauth.yandex.ru + одобренная заявка на доступ к API Директа",
+        key="bitrix_cloud",
+        name="Bitrix24 · облачная версия",
+        subtitle="Второй источник CRM; воронки распределяются в настройках",
+        docs="Портал → «Разработчикам» → «Другое» → «Входящий вебхук»",
         fields=[
             Field(
-                "yandex_oauth_token",
-                "OAuth-токен Яндекса",
-                "Общий для Директа и Метрики. Требуется одобренная заявка на API.",
+                "bitrix_cloud_webhook_url",
+                "URL входящего вебхука",
+                "Права на чтение CRM и запись задач.",
                 secret=True,
+                placeholder="https://<portal>.bitrix24.ru/rest/1/<код>/",
             ),
             Field(
-                "yandex_direct_login",
-                "Логин клиента Директа",
-                "Только для агентских аккаунтов, иначе оставьте пустым.",
-                secret=False,
-            ),
-        ],
-    ),
-    Provider(
-        key="yandex_metrika",
-        name="Яндекс Метрика",
-        subtitle="Визиты, источники, UTM, цели",
-        docs="Тот же OAuth-токен Яндекса + права «Просмотр» на счётчик",
-        fields=[
-            Field(
-                "yandex_metrika_counter_id",
-                "Номер счётчика",
-                "ID счётчика Метрики (например, 12345678). Токен — общий с Директом.",
-                secret=False,
-                placeholder="12345678",
-            ),
-        ],
-    ),
-    Provider(
-        key="calltouch",
-        name="Calltouch",
-        subtitle="Звонки и атрибуция источников",
-        docs="ЛК Calltouch → Интеграции → API (профессиональная версия)",
-        fields=[
-            Field(
-                "calltouch_site_id",
-                "ID проекта (siteId)",
-                "Числовой идентификатор проекта/сайта в Calltouch — он идёт в адрес "
-                "запроса. Без него API отвечает редиректом (не-JSON).",
-                secret=False,
-                placeholder="12345",
-            ),
-            Field(
-                "calltouch_client_api_id",
-                "API-токен (clientApiId)",
-                "Токен профессиональной версии Calltouch.",
+                "bitrix_cloud_inbound_token",
+                "Токен исходящих вебхуков",
+                "Необязательно; используется для проверки push-событий.",
                 secret=True,
             ),
         ],
     ),
     Provider(
-        key="moysklad",
-        name="МойСклад",
-        subtitle="Номенклатура, себестоимость, прибыль",
-        docs="Профиль сотрудника → «Токен доступа» (право видеть себестоимость)",
+        key="yandex_uo",
+        name="Яндекс · ЮО",
+        subtitle="Директ и Метрика юридического лица ЮО",
+        docs="OAuth Яндекса + доступ к API Директа и счётчику Метрики",
+        fields=[
+            Field("yandex_uo_oauth_token", "OAuth-токен", secret=True),
+            Field("yandex_uo_direct_login", "Логин Директа", secret=False),
+            Field(
+                "yandex_uo_metrika_counter_id", "Номер счётчика Метрики", secret=False
+            ),
+        ],
+    ),
+    Provider(
+        key="yandex_csv",
+        name="Яндекс · ЦСВ",
+        subtitle="Директ и Метрика юридического лица ЦСВ",
+        docs="OAuth Яндекса + доступ к API Директа и счётчику Метрики",
+        fields=[
+            Field("yandex_csv_oauth_token", "OAuth-токен", secret=True),
+            Field("yandex_csv_direct_login", "Логин Директа", secret=False),
+            Field(
+                "yandex_csv_metrika_counter_id", "Номер счётчика Метрики", secret=False
+            ),
+        ],
+    ),
+    Provider(
+        key="yandex_urpase",
+        name="Яндекс · УрПАСЭ",
+        subtitle="Директ и Метрика юридического лица УрПАСЭ",
+        docs="OAuth Яндекса + доступ к API Директа и счётчику Метрики",
+        fields=[
+            Field("yandex_urpase_oauth_token", "OAuth-токен", secret=True),
+            Field("yandex_urpase_direct_login", "Логин Директа", secret=False),
+            Field(
+                "yandex_urpase_metrika_counter_id",
+                "Номер счётчика Метрики",
+                secret=False,
+            ),
+        ],
+    ),
+    Provider(
+        key="onec",
+        name="1С:УНФ",
+        subtitle="Фактические поступления и статьи ДДС",
+        docs="HTTP-сервис из ТЗ, авторизация Basic Authentication",
         fields=[
             Field(
-                "moysklad_pg_dsn",
-                "DSN реплики (mpdb)",
-                "Первичный источник — Postgres-реплика МойСклад заказчика; API ниже "
-                "используется как резерв. Формат: "
-                "postgresql://user:pass@host:5432/mpdb?sslmode=require. "
-                "Оставьте пустым, чтобы брать данные только из API.",
-                secret=True,
-                placeholder="postgresql://user:pass@host:5432/mpdb",
+                "onec_endpoint",
+                "Endpoint HTTP-сервиса",
+                "Полный адрес метода получения поступлений из 1С:УНФ.",
+                secret=False,
+                placeholder="http://1c.example.local/path",
             ),
             Field(
-                "moysklad_token",
-                "Токен сотрудника",
-                "С правом «Видеть себестоимость, цену закупки и прибыль товаров». "
-                "Используется как резерв, если данных нет в реплике.",
+                "onec_username",
+                "Логин Basic Authentication",
+                "Пользователь HTTP-сервиса 1С.",
+                secret=False,
+            ),
+            Field(
+                "onec_password",
+                "Пароль Basic Authentication",
+                "Пароль хранится в настройках и не выводится в журналы.",
                 secret=True,
             ),
         ],
@@ -321,6 +328,13 @@ def _current_value(overrides: dict[str, str], key: str) -> str:
     return str(getattr(settings, key, "") or "")
 
 
+def _masked(value: str) -> str:
+    if not value:
+        return ""
+    tail = value[-4:] if len(value) > 4 else ""
+    return f"••••{tail}"
+
+
 async def get_config(session: AsyncSession) -> dict:
     """Структура для UI: провайдеры, поля (маскированные), признаки заполнения."""
     row = await _load_row(session)
@@ -349,7 +363,13 @@ async def get_config(session: AsyncSession) -> dict:
         filled_count = 0
         # Необязательные поля (не влияют на признак «настроено»): доп. логин Директа,
         # токен исходящих Битрикс, DSN реплики МойСклад (ускоритель поверх API).
-        _optional = {"yandex_direct_login", "bitrix24_inbound_token", "moysklad_pg_dsn"}
+        _optional = {
+            "bitrix_box_inbound_token",
+            "bitrix_cloud_inbound_token",
+            "yandex_uo_direct_login",
+            "yandex_csv_direct_login",
+            "yandex_urpase_direct_login",
+        }
         required = [f for f in p.fields if f.key not in _optional]
         for f in p.fields:
             raw = _current_value(overrides, f.key)
@@ -363,10 +383,9 @@ async def get_config(session: AsyncSession) -> dict:
                 "secret": f.secret,
                 "placeholder": f.placeholder,
                 "filled": is_filled,
-                # Возвращаем реальное значение, чтобы поле было предзаполнено и его
-                # было видно/можно редактировать (страница заменяет правку .env).
-                # Секреты отображаются в поле-пароле (точки + кнопка «показать»).
-                "value": raw,
+                # Маска остаётся неизменным черновиком на фронтенде и поэтому не
+                # отправляется назад, пока пользователь не введёт новое значение.
+                "value": _masked(raw) if f.secret else raw,
             })
         configured = filled_count >= len(required) if required else False
         providers_out.append({

@@ -10,6 +10,7 @@ from app.integrations.real.moysklad import (
     PgMoyskladAdapter,
     RealMoyskladAdapter,
 )
+from app.integrations.real.onec import RealOneCAdapter
 from app.integrations.real.yandex_direct import RealYandexDirectAdapter
 from app.integrations.real.yandex_metrika import RealYandexMetrikaAdapter
 
@@ -19,6 +20,7 @@ __all__ = [
     "RealBitrix24Adapter",
     "RealCalltouchAdapter",
     "RealMoyskladAdapter",
+    "RealOneCAdapter",
     "RealYandexDirectAdapter",
     "RealYandexMetrikaAdapter",
 ]

@@ -21,6 +21,7 @@ from app.models import (
     AiInsight,
     Baseline,
     BudgetRec,
+    BusinessSettings,
     Call,
     Campaign,
     Channel,
@@ -36,6 +37,7 @@ from app.models import (
     Violation,
 )
 from app.seeds.budget_recs import BUDGET_RECS
+from app.seeds.business import BUSINESS_SETTINGS
 from app.seeds.insights import INSIGHTS
 from app.seeds.kpi import BASE, KPI_CARDS
 from app.seeds.minus_words import build_minus_words
@@ -50,7 +52,7 @@ _CLEAR_ORDER = [
     StageHistory, Task, Payment, Call, Campaign,
     Deal, Channel, Violation, ManagerControl,
     Baseline, KpiCard, AiInsight, BudgetRec, MinusWord,
-    SettingsHistory, RegulationConfig,
+    SettingsHistory, RegulationConfig, BusinessSettings,
 ]
 
 
@@ -67,6 +69,7 @@ async def seed_all(session: AsyncSession) -> None:
     _seed_budget_recs(session)
     _seed_minus_words(session)
     _seed_regulation(session)
+    session.add(BusinessSettings(id=1, data=BUSINESS_SETTINGS))
 
     await session.commit()
     logger.info("Демо-данные загружены в БД")

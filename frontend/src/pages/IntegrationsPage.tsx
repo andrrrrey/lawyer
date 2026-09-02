@@ -3,7 +3,6 @@ import { App, Button, Input, Segmented, Spin } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { FieldMapSection } from "@/components/FieldMapSection";
-import { MpdbSchemaSection } from "@/components/MpdbSchemaSection";
 import {
   type CheckResult,
   type CheckStatus,
@@ -22,11 +21,18 @@ import {
 } from "@/api/integrations";
 
 const PROVIDER_NAMES: Record<string, string> = {
-  bitrix24: "Битрикс24",
+  bitrix: "Bitrix24",
+  bitrix_box: "Bitrix24 · коробка",
+  bitrix_cloud: "Bitrix24 · облако",
   yandex_direct: "Яндекс Директ",
   yandex_metrika: "Яндекс Метрика",
-  calltouch: "Calltouch",
-  moysklad: "МойСклад",
+  yandex_direct_uo: "Директ · ЮО",
+  yandex_direct_csv: "Директ · ЦСВ",
+  yandex_direct_urpase: "Директ · УрПАСЭ",
+  yandex_metrika_uo: "Метрика · ЮО",
+  yandex_metrika_csv: "Метрика · ЦСВ",
+  yandex_metrika_urpase: "Метрика · УрПАСЭ",
+  onec: "1С:УНФ",
   demo: "Демо-данные",
 };
 
@@ -411,9 +417,6 @@ export default function IntegrationsPage() {
 
       {/* Сопоставление пользовательских полей Битрикс24 */}
       <FieldMapSection targets={cfg.field_targets} initial={cfg.field_map} />
-
-      {/* Структура Postgres-реплики МойСклад (mpdb) */}
-      <MpdbSchemaSection />
 
       {/* Нижняя панель действий */}
       <div className="intg-footer">

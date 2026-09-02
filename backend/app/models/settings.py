@@ -39,6 +39,21 @@ class IntegrationSettings(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class BusinessSettings(Base):
+    """Настройки единого контура Lawyer с тремя юридическими лицами.
+
+    Это не модель арендаторов: строка всегда одна (id=1), а юридическое лицо —
+    измерение для фильтрации и сопоставления данных из CRM, 1С и рекламы.
+    В JSON хранятся редактируемые справочники воронок, сотрудников, планов,
+    правил SLA и разрешённых статей ДДС.
+    """
+
+    __tablename__ = "business_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class SettingsHistory(Base):
     """История изменений регламента (HISTORY): кто, когда, что менял."""
 

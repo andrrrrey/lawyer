@@ -1,13 +1,21 @@
-"""Маркетинг и деньги: каналы, кампании, оплаты и сырьё источников.
-
-Источники: Яндекс Директ / Метрика, Calltouch, МойСклад.
-"""
+"""Маркетинг и деньги: Яндекс Директ/Метрика и фактические поступления 1С."""
 
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -85,6 +93,8 @@ class AdCost(Base):
     __tablename__ = "ad_costs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
+    account_key: Mapped[str] = mapped_column(String(48), default="")
     date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     campaign: Mapped[str] = mapped_column(String(128), default="")
     # ID кампании Директа — по нему сделки привязываются к кампании (utm_campaign).
@@ -105,6 +115,8 @@ class Visit(Base):
     __tablename__ = "visits"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
+    account_key: Mapped[str] = mapped_column(String(48), default="")
     date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source: Mapped[str] = mapped_column(String(128), default="")
     utm: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -136,3 +148,49 @@ class Product(Base):
     brand: Mapped[str | None] = mapped_column(String(128), nullable=True)
     cost_price: Mapped[float] = mapped_column(Float, default=0)
     profit: Mapped[float] = mapped_column(Float, default=0)
+
+
+class OneCReceipt(Base):
+    """Банковское/кассовое поступление из 1С:УНФ.
+
+    Сохраняется исходный идентификатор регистратора и результат сопоставления
+    с Bitrix24 по полям Код_BTX/Тип_BTX. Несопоставленные и исключённые строки
+    остаются в журнале для ручного контроля.
+    """
+
+    __tablename__ = "one_c_receipts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_key: Mapped[str] = mapped_column(String(72), unique=True)
+    registrar_id: Mapped[str] = mapped_column(String(128), default="")
+    registrar_number: Mapped[str] = mapped_column(String(64), default="")
+    registrar_type: Mapped[str] = mapped_column(String(64), default="")
+    registrar_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
+    organization_id: Mapped[str] = mapped_column(String(128), default="")
+    organization_name: Mapped[str] = mapped_column(String(255), default="")
+    organization_inn: Mapped[str] = mapped_column(String(16), default="")
+    counterparty_id: Mapped[str] = mapped_column(String(128), default="")
+    counterparty_name: Mapped[str] = mapped_column(String(255), default="")
+    counterparty_inn: Mapped[str] = mapped_column(String(16), default="")
+    contract_id: Mapped[str] = mapped_column(String(128), default="")
+    contract_number: Mapped[str] = mapped_column(String(128), default="")
+
+    article_id: Mapped[str] = mapped_column(String(128), default="")
+    article_code: Mapped[str] = mapped_column(String(128), default="")
+    article_name: Mapped[str] = mapped_column(String(255), default="")
+    operation: Mapped[str] = mapped_column(String(16), default="income")
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"))
+    currency: Mapped[str] = mapped_column(String(8), default="RUB")
+
+    crm_source: Mapped[str] = mapped_column(String(32), default="")
+    crm_entity_type: Mapped[str] = mapped_column(String(16), default="")
+    crm_external_id: Mapped[str] = mapped_column(String(48), default="")
+    matched_deal_id: Mapped[int | None] = mapped_column(
+        ForeignKey("deals.id", ondelete="SET NULL"), nullable=True
+    )
+    excluded: Mapped[bool] = mapped_column(Boolean, default=False)
+    exclusion_reason: Mapped[str] = mapped_column(String(255), default="")
+    raw: Mapped[dict] = mapped_column(JSON, default=dict)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

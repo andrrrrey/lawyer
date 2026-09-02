@@ -23,6 +23,7 @@ export interface Violation {
   kind_class: string;
   name: string;
   ref: string;
+  deal_key: string;
   mgr: string;
   src: string;
   norm: string;
@@ -67,7 +68,8 @@ export interface CreatedTask {
 export function useCreateTask() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (ref: string) => api.post<CreatedTask>("/monitor/task", { ref }),
+    mutationFn: (dealKey: string) =>
+      api.post<CreatedTask>("/monitor/task", { deal_key: dealKey }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["monitor"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });

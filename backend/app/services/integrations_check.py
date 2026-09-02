@@ -90,6 +90,54 @@ def check_bitrix24() -> dict:
     return _err(f"Портал недоступен (HTTP {resp.status_code}).")
 
 
+def _check_bitrix_connection(url: str) -> dict:
+    """Проверка одного из двух подключений без подмены глобального settings."""
+    base = (url or "").rstrip("/")
+    if not base:
+        return _missing("Не указан URL входящего вебхука.")
+    try:
+        resp = httpx.post(
+            f"{base}/profile.json", json={}, timeout=_TIMEOUT, follow_redirects=_FOLLOW
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err("Ошибка соединения с Bitrix24.", _describe_exc(exc))
+    try:
+        data = resp.json()
+    except ValueError:
+        return _err(f"Bitrix24 вернул не JSON (HTTP {resp.status_code}).")
+    if resp.status_code == 200 and isinstance(data, dict) and not data.get("error"):
+        return _ok("Доступ Bitrix24 подтверждён.")
+    if resp.status_code in (401, 403):
+        return _err("Вебхук Bitrix24 недействителен или не имеет прав.")
+    return _err(f"Bitrix24 вернул HTTP {resp.status_code}.")
+
+
+def _check_yandex_account(token: str, counter_id: str) -> dict:
+    """Проверка связки Директ + Метрика одного юридического лица."""
+    if not token or not counter_id:
+        return _missing("Не указан OAuth-токен или номер счётчика Метрики.")
+    try:
+        resp = httpx.get(
+            "https://api-metrika.yandex.net/stat/v1/data",
+            headers={"Authorization": f"OAuth {token}"},
+            params={
+                "ids": counter_id,
+                "metrics": "ym:s:visits",
+                "date1": "yesterday",
+                "date2": "yesterday",
+            },
+            timeout=_TIMEOUT,
+            follow_redirects=_FOLLOW,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err("Ошибка соединения с API Яндекса.", _describe_exc(exc))
+    if resp.status_code == 200:
+        return _ok("Доступ к аккаунту Яндекса подтверждён.", f"Счётчик {counter_id}")
+    if resp.status_code in (401, 403):
+        return _err("OAuth-токен недействителен или нет доступа к счётчику.")
+    return _err(f"API Яндекса вернул HTTP {resp.status_code}.")
+
+
 def check_yandex_direct() -> dict:
     token = settings.yandex_oauth_token or ""
     if not token:
@@ -275,6 +323,32 @@ def check_moysklad() -> dict:
     return _err(f"API МойСклад вернул HTTP {resp.status_code}.")
 
 
+def check_onec() -> dict:
+    endpoint = (settings.onec_endpoint or "").strip()
+    username = settings.onec_username or ""
+    password = settings.onec_password or ""
+    if not endpoint or not username or not password:
+        return _missing("Не указаны endpoint, логин или пароль 1С.")
+    try:
+        response = httpx.get(
+            endpoint,
+            auth=httpx.BasicAuth(username, password),
+            timeout=_TIMEOUT,
+            follow_redirects=_FOLLOW,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err("Ошибка соединения с HTTP-сервисом 1С.", _describe_exc(exc))
+    if response.status_code == 200:
+        try:
+            response.json()
+        except ValueError:
+            return _err("1С отвечает, но вернула не JSON.")
+        return _ok("Доступ к 1С:УНФ подтверждён.")
+    if response.status_code in (401, 403):
+        return _err("1С отклонила Basic Authentication.")
+    return _err(f"HTTP-сервис 1С вернул HTTP {response.status_code}.")
+
+
 def check_llm() -> dict:
     base = (settings.llm_base_url or "").rstrip("/")
     key = settings.llm_api_key or ""
@@ -299,11 +373,18 @@ def check_llm() -> dict:
 
 
 _CHECKS = {
-    "bitrix24": check_bitrix24,
-    "yandex_direct": check_yandex_direct,
-    "yandex_metrika": check_yandex_metrika,
-    "calltouch": check_calltouch,
-    "moysklad": check_moysklad,
+    "bitrix_box": lambda: _check_bitrix_connection(settings.bitrix_box_webhook_url),
+    "bitrix_cloud": lambda: _check_bitrix_connection(settings.bitrix_cloud_webhook_url),
+    "yandex_uo": lambda: _check_yandex_account(
+        settings.yandex_uo_oauth_token, settings.yandex_uo_metrika_counter_id
+    ),
+    "yandex_csv": lambda: _check_yandex_account(
+        settings.yandex_csv_oauth_token, settings.yandex_csv_metrika_counter_id
+    ),
+    "yandex_urpase": lambda: _check_yandex_account(
+        settings.yandex_urpase_oauth_token, settings.yandex_urpase_metrika_counter_id
+    ),
+    "onec": check_onec,
     "llm": check_llm,
 }
 

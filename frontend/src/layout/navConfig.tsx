@@ -63,9 +63,17 @@ export const NAV_ITEMS: NavItem[] = [
     Icon: AiIcon,
   },
   {
+    key: "settings",
+    path: "/settings",
+    label: "Настройки",
+    subtitle: "Юрлица, воронки, SLA, сотрудники и планы",
+    section: "Настройка",
+    Icon: AdminIcon,
+  },
+  {
     key: "admin",
     path: "/admin",
-    label: "Админ-панель регламента",
+    label: "Регламент (старый)",
     subtitle: "Настройка параметров контроля без разработчика",
     section: "Настройка",
     Icon: AdminIcon,

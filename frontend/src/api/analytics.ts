@@ -22,18 +22,19 @@ export interface ChannelRow extends Omit<Campaign, "name"> {
   name: string; color: string; campaigns: Campaign[];
 }
 
-export const useChain = (period: string) =>
+export const useChain = (period: string, legalEntity: string) =>
   useQuery<ChainStep[]>({
-    queryKey: ["analytics", "chain", period],
-    queryFn: () => api.get(`/analytics/chain?period=${encodeURIComponent(period)}`),
+    queryKey: ["analytics", "chain", period, legalEntity],
+    queryFn: () => api.get(`/analytics/chain?period=${encodeURIComponent(period)}&legal_entity=${encodeURIComponent(legalEntity)}`),
   });
 
-export const useChannels = (channel: string, period: string) =>
+export const useChannels = (channel: string, period: string, legalEntity: string) =>
   useQuery<ChannelRow[]>({
-    queryKey: ["analytics", "channels", channel, period],
+    queryKey: ["analytics", "channels", channel, period, legalEntity],
     queryFn: () =>
       api.get(
         `/analytics/channels?channel=${encodeURIComponent(channel)}` +
-          `&period=${encodeURIComponent(period)}`,
+          `&period=${encodeURIComponent(period)}` +
+          `&legal_entity=${encodeURIComponent(legalEntity)}`,
       ),
   });

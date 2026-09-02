@@ -25,7 +25,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
       <div className="brand">
-        <div className="logo">B</div>
+        <div className="logo">L</div>
         <div>
           <b>Lawyer</b>
           <span>Контроль лидов и аналитика</span>

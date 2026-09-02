@@ -38,7 +38,7 @@ function InsightCard({ x }: { x: Insight }) {
         <div className="rec-meta">
           <div className="rec-src">{x.src.map((s) => <span key={s} className="srcchip">{s}</span>)}</div>
           <span className="conf">достоверность: <b>{x.conf}</b></span>
-          {x.dep ? <span className="depchip">треб. связки с МойСклад</span> : null}
+          {x.dep ? <span className="depchip">треб. связки с 1С</span> : null}
         </div>
       </div>
     </div>

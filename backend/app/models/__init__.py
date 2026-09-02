@@ -13,17 +13,24 @@ from app.models.marketing import (
     Call,
     Campaign,
     Channel,
+    OneCReceipt,
     Payment,
     Product,
     Visit,
 )
-from app.models.settings import IntegrationSettings, RegulationConfig, SettingsHistory
+from app.models.settings import (
+    BusinessSettings,
+    IntegrationSettings,
+    RegulationConfig,
+    SettingsHistory,
+)
 
 __all__ = [
     "AdCost",
     "AiInsight",
     "Baseline",
     "BudgetRec",
+    "BusinessSettings",
     "Call",
     "Campaign",
     "Channel",
@@ -32,6 +39,7 @@ __all__ = [
     "KpiCard",
     "ManagerControl",
     "MinusWord",
+    "OneCReceipt",
     "Payment",
     "Product",
     "RegulationConfig",

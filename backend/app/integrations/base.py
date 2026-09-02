@@ -12,6 +12,15 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
+class OneCAdapter(Protocol):
+    """1С:УНФ: фактические поступления денежных средств."""
+
+    def fetch_receipts(
+        self, date_from: str | None = None, date_to: str | None = None
+    ) -> list[dict]: ...
+
+
+@runtime_checkable
 class Bitrix24Adapter(Protocol):
     """Битрикс24: сделки единой воронки, история этапов, задачи."""
 

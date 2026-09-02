@@ -49,23 +49,35 @@ export interface Lead {
   name: string; src: string; mgr: string; status_label: string; status_class: string;
   fc: string; call: boolean; inv: boolean; pay: boolean; amount: number; amount_display: string;
   risk: string | null; tags: string[]; ai: string; reason: string;
+  legal_entity_key: string;
 }
 
 // Фильтры панели дашборда: период + менеджер + источник. Витрины принимают их
 // целиком — иначе выпадающие списки не влияли ни на что, кроме таблицы лидов.
-export interface DashFilters { period: string; mgr: string; source: string; }
+export interface DashFilters {
+  period: string;
+  mgr: string;
+  source: string;
+  legalEntity: string;
+}
 
 const qs = (f: DashFilters) => {
   const q = new URLSearchParams({ period: f.period });
   if (f.mgr && f.mgr !== "all") q.set("mgr", f.mgr);
   if (f.source && f.source !== "all") q.set("source", f.source);
+  if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
   return `?${q.toString()}`;
 };
 
 // Ключ кэша запроса: меняется вместе с любым из фильтров.
-const key = (f: DashFilters) => [f.period, f.mgr, f.source];
+const key = (f: DashFilters) => [f.period, f.legalEntity, f.mgr, f.source];
 
-export interface FilterOptions { managers: string[]; channels: string[]; sources: string[]; }
+export interface FilterOptions {
+  managers: string[];
+  channels: string[];
+  sources: string[];
+  legal_entities: { value: string; label: string }[];
+}
 
 export const useFilterOptions = () =>
   useQuery<FilterOptions>({
@@ -79,13 +91,14 @@ export const useKpis = (f: DashFilters) =>
 
 export const useAttention = (f: DashFilters) =>
   useQuery<Attention>({
-    queryKey: ["dashboard", "attention", f.mgr, f.source],
+    queryKey: ["dashboard", "attention", f.legalEntity, f.mgr, f.source],
     // Триаж показывает состояние «сейчас» — период к нему не применяется,
     // но менеджер и источник сужают выборку.
     queryFn: () => {
       const q = new URLSearchParams();
       if (f.mgr && f.mgr !== "all") q.set("mgr", f.mgr);
       if (f.source && f.source !== "all") q.set("source", f.source);
+      if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
       const s = q.toString();
       return api.get(`/dashboard/attention${s ? `?${s}` : ""}`);
     },
@@ -106,13 +119,20 @@ export const useRomiByChannel = (f: DashFilters) =>
 export const useManagers = (f: DashFilters) =>
   useQuery<Manager[]>({ queryKey: ["dashboard", "managers", ...key(f)], queryFn: () => api.get(`/dashboard/managers${qs(f)}`) });
 
-export const useLeads = (mgr: string, source: string, risk: string | null, period: string) =>
+export const useLeads = (
+  mgr: string,
+  source: string,
+  risk: string | null,
+  period: string,
+  legalEntity: string,
+) =>
   useQuery<Lead[]>({
-    queryKey: ["dashboard", "leads", mgr, source, risk, period],
+    queryKey: ["dashboard", "leads", legalEntity, mgr, source, risk, period],
     queryFn: () => {
       const q = new URLSearchParams();
       if (mgr && mgr !== "all") q.set("mgr", mgr);
       if (source && source !== "all") q.set("source", source);
+      if (legalEntity && legalEntity !== "all") q.set("legal_entity", legalEntity);
       if (risk) q.set("risk", risk);
       if (period) q.set("period", period);
       const qs = q.toString();

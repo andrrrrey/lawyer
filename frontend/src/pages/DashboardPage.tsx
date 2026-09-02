@@ -28,7 +28,12 @@ function ChartCard({ title, sub, children }: { title: string; sub: string; child
 export default function DashboardPage() {
   const f = useFilters();
   // Все витрины дашборда следуют одному набору фильтров панели.
-  const q = { period: f.period, mgr: f.mgr, source: f.source };
+  const q = {
+    period: f.period,
+    legalEntity: f.legalEntity,
+    mgr: f.mgr,
+    source: f.source,
+  };
   const kpis = useKpis(q);
   const attention = useAttention(q);
   const funnel = useFunnel(q);
@@ -36,7 +41,7 @@ export default function DashboardPage() {
   const revenue = useRevenueSeries(q);
   const romi = useRomiByChannel(q);
   const managers = useManagers(q);
-  const leads = useLeads(f.mgr, f.source, f.leadFilter, f.period);
+  const leads = useLeads(f.mgr, f.source, f.leadFilter, f.period, f.legalEntity);
 
   return (
     <>

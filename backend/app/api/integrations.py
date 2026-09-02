@@ -81,19 +81,27 @@ async def put_field_map(
 
 
 @router.get("/bitrix/schema")
-async def bitrix_schema(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def bitrix_schema(
+    source: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
     """Живая схема воронки Битрикс24: поля сделки и стадии (для настройки маппинга)."""
     await cfg.apply_overrides_from_db(session)
 
     def _load() -> dict[str, Any]:
         from app.integrations import factory
+        connections = factory.get_bitrix24_connections()
+        adapter = next(
+            (item for key, item in connections if key == source),
+            connections[0][1] if connections else factory.get_bitrix24(),
+        )
         try:
-            fields = factory.get_bitrix24().fetch_deal_fields()
+            fields = adapter.fetch_deal_fields()
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc), "fields": [], "stages": []}
         stages = []
         try:
-            stages = factory.get_bitrix24().fetch_stages()
+            stages = adapter.fetch_stages()
         except Exception:  # noqa: BLE001 — стадии необязательны для маппинга полей
             pass
         return {"ok": True, "fields": fields, "stages": stages}

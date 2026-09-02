@@ -10,12 +10,13 @@ application_token (формат исходящих вебхуков Битрик
 параллельно идущему полному пересчёту.
 
 Сверка намеренно лёгкая: событие по сделке не требует перевыгрузки рекламных
-источников (Директ/Метрика/МойСклад) — их отчёты готовятся минутами и упираются
+источников (Директ/Метрика/1С) — их отчёты могут готовиться дольше и упираются
 в лимиты API. Полный пересчёт идёт по расписанию отдельно.
 """
 
 from __future__ import annotations
 
+import hmac
 import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -91,11 +92,23 @@ async def bitrix24_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    expected = settings.bitrix24_inbound_token
+    source = request.query_params.get("source")
+    by_source = {
+        "box": settings.bitrix_box_inbound_token,
+        "cloud": settings.bitrix_cloud_inbound_token,
+    }
+    expected_values = (
+        [by_source.get(source, "")] if source else [
+            settings.bitrix24_inbound_token,
+            settings.bitrix_box_inbound_token,
+            settings.bitrix_cloud_inbound_token,
+        ]
+    )
+    expected_values = [value for value in expected_values if value]
     token = await _extract_token(request)
 
-    if expected:
-        if not token or token != expected:
+    if expected_values:
+        if not token or not any(hmac.compare_digest(token, value) for value in expected_values):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный токен вебхука"
             )

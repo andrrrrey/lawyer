@@ -22,9 +22,13 @@ def _has_num(text: str) -> bool:
     return any(ch.isdigit() for ch in text)
 
 
-async def chain(session: AsyncSession, period: str) -> list[dict]:
+async def chain(
+    session: AsyncSession, period: str, legal_entity: str = "all"
+) -> list[dict]:
     from app.services import metrics
-    base, m = await metrics._base_and_mult(session, period)
+    base, m = await metrics._base_and_mult(
+        session, period, legal_entity=legal_entity
+    )
     real = settings.data_source == "real"
 
     steps: list[dict] = []
@@ -110,7 +114,10 @@ async def _stored_table(session: AsyncSession) -> list[dict]:
 
 
 async def channels_table(
-    session: AsyncSession, channel: str = "all", period: str = "30"
+    session: AsyncSession,
+    channel: str = "all",
+    period: str = "30",
+    legal_entity: str = "all",
 ) -> list[dict]:
     """Сводка по каналам и кампаниям за выбранный период.
 
@@ -119,7 +126,7 @@ async def channels_table(
     при переключении «сегодня / 7 дней / 30 дней / квартал».
     """
     rebuilt = (
-        await ch_svc.for_period(session, period)
+        await ch_svc.for_period(session, period, legal_entity=legal_entity)
         if settings.data_source == "real" else None
     )
     if rebuilt is None:

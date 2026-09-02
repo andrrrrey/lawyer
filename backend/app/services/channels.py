@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AdCost, Deal
+from app.models import AdCost, Deal, OneCReceipt
 from app.services import ingest
 from app.services import period as per
 
@@ -29,6 +29,7 @@ def deal_row(deal: Deal) -> dict:
     """Сделка из БД → запись в форме, которую ждёт агрегатор конвейера."""
     return {
         "campaign": deal.campaign,
+        "external_id": deal.external_id,
         "amount": int(deal.amount or 0),
         # Семантика успеха в БД хранится классом статуса (см. ingest._stage_class).
         "semantic": "S" if deal.status_class == "st-ok" else None,
@@ -37,7 +38,12 @@ def deal_row(deal: Deal) -> dict:
 
 
 async def for_period(
-    session: AsyncSession, period: str, *, mgr: str = "all", source: str = "all"
+    session: AsyncSession,
+    period: str,
+    *,
+    mgr: str = "all",
+    source: str = "all",
+    legal_entity: str = "all",
 ) -> list[dict] | None:
     """Каналы/кампании за период или None, если посуточного сырья ещё нет."""
     if not await has_daily_costs(session):
@@ -49,6 +55,8 @@ async def for_period(
     cost_where = [AdCost.date.is_not(None), AdCost.date >= start]
     if end is not None:
         cost_where.append(AdCost.date < end)
+    if legal_entity and legal_entity != "all":
+        cost_where.append(AdCost.legal_entity_key == legal_entity)
     costs = (await session.execute(
         select(AdCost).where(*cost_where)
     )).scalars().all()
@@ -68,6 +76,30 @@ async def for_period(
         stmt = stmt.where(Deal.mgr == mgr)
     if source and source != "all":
         stmt = stmt.where(Deal.src == source)
+    if legal_entity and legal_entity != "all":
+        stmt = stmt.where(Deal.legal_entity_key == legal_entity)
     deals = (await session.execute(stmt)).scalars().all()
 
-    return ingest.aggregate_channels(cost_rows, [deal_row(d) for d in deals])
+    receipt_where = [
+        OneCReceipt.excluded.is_(False),
+        OneCReceipt.registrar_date.is_not(None),
+        OneCReceipt.registrar_date >= start,
+    ]
+    if end is not None:
+        receipt_where.append(OneCReceipt.registrar_date < end)
+    if legal_entity and legal_entity != "all":
+        receipt_where.append(OneCReceipt.legal_entity_key == legal_entity)
+    receipts = (
+        await session.execute(select(OneCReceipt).where(*receipt_where))
+    ).scalars().all()
+    receipt_rows = [
+        {
+            "crm_external_id": row.crm_external_id,
+            "amount": row.amount,
+            "excluded": row.excluded,
+        }
+        for row in receipts
+    ]
+    return ingest.aggregate_channels(
+        cost_rows, [deal_row(deal) for deal in deals], receipt_rows
+    )

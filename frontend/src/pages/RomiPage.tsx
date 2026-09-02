@@ -36,7 +36,7 @@ function RecCard({ r }: { r: BudgetRec }) {
         <div className="rec-meta">
           <SrcChips src={r.src} />
           <span className="conf">достоверность: <b>{r.conf}</b></span>
-          {r.dep ? <span className="depchip" title="Требует настроенной связки сделка ↔ отгрузка">треб. связки с МойСклад</span> : null}
+          {r.dep ? <span className="depchip" title="Требует настроенной связки сделка ↔ поступление">треб. связки с 1С</span> : null}
         </div>
         <div className="rec-act">
           <Button type="primary" size="small" onClick={() => message.success("Рекомендация принята — сформирована задача")}>Принять</Button>
@@ -106,7 +106,7 @@ export default function RomiPage() {
         <div className="card" style={{ marginTop: 12 }}>
           <EmptyState
             title="Рекомендаций пока нет"
-            hint="Рекомендации по бюджету формирует AI-слой по данным Директа и МойСклад. Подключите интеграции, выполните пересчёт и нажмите «Сгенерировать AI» на странице «Интеграции»."
+            hint="Рекомендации по бюджету формирует AI-слой по данным Директа и фактическим поступлениям 1С. Подключите интеграции, выполните пересчёт и нажмите «Сгенерировать AI» на странице «Интеграции»."
           />
         </div>
       ) : (

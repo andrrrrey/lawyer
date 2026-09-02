@@ -23,18 +23,24 @@ async def get_kpis(
     period: str = "30",
     mgr: str = "all",
     source: str = "all",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    return await metrics.kpis(session, period, mgr=mgr, source=source)
+    return await metrics.kpis(
+        session, period, mgr=mgr, source=source, legal_entity=legal_entity
+    )
 
 
 @router.get("/attention")
 async def get_attention(
     mgr: str = "all",
     source: str = "all",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    return await metrics.attention(session, mgr=mgr, source=source)
+    return await metrics.attention(
+        session, mgr=mgr, source=source, legal_entity=legal_entity
+    )
 
 
 @router.get("/filters")
@@ -48,9 +54,12 @@ async def get_funnel(
     period: str = "30",
     mgr: str = "all",
     source: str = "all",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    return await metrics.funnel(session, period, mgr=mgr, source=source)
+    return await metrics.funnel(
+        session, period, mgr=mgr, source=source, legal_entity=legal_entity
+    )
 
 
 @router.get("/sources")
@@ -58,9 +67,12 @@ async def get_sources(
     period: str = "30",
     mgr: str = "all",
     source: str = "all",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    return await metrics.sources(session, period, mgr=mgr, source=source)
+    return await metrics.sources(
+        session, period, mgr=mgr, source=source, legal_entity=legal_entity
+    )
 
 
 @router.get("/revenue-series")
@@ -68,9 +80,12 @@ async def get_revenue_series(
     period: str = "30",
     mgr: str = "all",
     source: str = "all",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    return await metrics.revenue_series(session, period, mgr=mgr, source=source)
+    return await metrics.revenue_series(
+        session, period, mgr=mgr, source=source, legal_entity=legal_entity
+    )
 
 
 @router.get("/romi-by-channel")
@@ -78,9 +93,12 @@ async def get_romi_by_channel(
     period: str = "30",
     mgr: str = "all",
     source: str = "all",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    return await metrics.romi_by_channel(session, period, mgr=mgr, source=source)
+    return await metrics.romi_by_channel(
+        session, period, mgr=mgr, source=source, legal_entity=legal_entity
+    )
 
 
 @router.get("/managers")
@@ -88,9 +106,12 @@ async def get_managers(
     period: str = "30",
     mgr: str = "all",
     source: str = "all",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    return await metrics.managers(session, period, mgr=mgr, source=source)
+    return await metrics.managers(
+        session, period, mgr=mgr, source=source, legal_entity=legal_entity
+    )
 
 
 @router.get("/leads")
@@ -99,6 +120,14 @@ async def get_leads(
     source: str = "all",
     risk: str | None = None,
     period: str = "30",
+    legal_entity: str = "all",
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    return await metrics.leads(session, mgr=mgr, source=source, risk=risk, period=period)
+    return await metrics.leads(
+        session,
+        mgr=mgr,
+        source=source,
+        risk=risk,
+        period=period,
+        legal_entity=legal_entity,
+    )

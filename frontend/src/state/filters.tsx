@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
 
 // Глобальные фильтры дашборда/аналитики (период, канал, менеджер, источник)
@@ -7,11 +8,13 @@ export interface FiltersState {
   channel: string;
   mgr: string;
   source: string;
+  legalEntity: string;
   leadFilter: string | null;
   setPeriod: (v: string) => void;
   setChannel: (v: string) => void;
   setMgr: (v: string) => void;
   setSource: (v: string) => void;
+  setLegalEntity: (v: string) => void;
   setLeadFilter: (v: string | null) => void;
 }
 
@@ -22,14 +25,15 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
   const [channel, setChannel] = useState("all");
   const [mgr, setMgr] = useState("all");
   const [source, setSource] = useState("all");
+  const [legalEntity, setLegalEntity] = useState("all");
   const [leadFilter, setLeadFilter] = useState<string | null>(null);
 
   const value = useMemo(
     () => ({
-      period, channel, mgr, source, leadFilter,
-      setPeriod, setChannel, setMgr, setSource, setLeadFilter,
+      period, channel, mgr, source, legalEntity, leadFilter,
+      setPeriod, setChannel, setMgr, setSource, setLegalEntity, setLeadFilter,
     }),
-    [period, channel, mgr, source, leadFilter],
+    [period, channel, mgr, source, legalEntity, leadFilter],
   );
 
   return <FiltersContext.Provider value={value}>{children}</FiltersContext.Provider>;

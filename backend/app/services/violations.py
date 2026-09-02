@@ -7,12 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Deal
-from app.services import content, reglament
+from app.services import business_settings, content, reglament
 from app.services.clock import reference_now
 
 
 async def evaluate_current(
-    session: AsyncSession, mgr: str = "all", source: str = "all"
+    session: AsyncSession,
+    mgr: str = "all",
+    source: str = "all",
+    legal_entity: str = "all",
 ) -> dict:
     """Возвращает {'regular': [...], 'review': [...]} по текущим данным и настройкам.
 
@@ -23,12 +26,31 @@ async def evaluate_current(
         stmt = stmt.where(Deal.mgr == mgr)
     if source and source != "all":
         stmt = stmt.where(Deal.src == source)
+    if legal_entity and legal_entity != "all":
+        stmt = stmt.where(Deal.legal_entity_key == legal_entity)
     deals = (await session.execute(stmt)).scalars().all()
     config = await content.regulation(session)
+    business_config = await business_settings.get_settings(session)
     # Сопоставление пользовательских полей Битрикс — только для движка (не в админку).
     from app.services.integrations_config import get_field_map
     config = {**config, "field_map": await get_field_map(session)}
-    return reglament.evaluate(list(deals), config, reference_now())
+    grouped: dict[str, tuple[dict | None, list[Deal]]] = {}
+    for deal in deals:
+        profile = business_settings.sla_profile_for_funnel(
+            business_config, deal.crm_source, deal.funnel_id
+        )
+        key = str((profile or {}).get("key") or "legacy")
+        grouped.setdefault(key, (profile, []))[1].append(deal)
+    result = {"regular": [], "review": []}
+    for profile, profile_deals in grouped.values():
+        evaluated = reglament.evaluate(
+            profile_deals,
+            {**config, "sla_profile": profile or {}},
+            reference_now(),
+        )
+        result["regular"].extend(evaluated["regular"])
+        result["review"].extend(evaluated["review"])
+    return result
 
 
 # Порог «выброса» по умолчанию: сделки с суммой выше не учитываются в «деньгах под

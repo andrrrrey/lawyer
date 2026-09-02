@@ -80,6 +80,7 @@ STAGE_TASK_RULE = {
 
 # Короткие подписи обязательных полей и предикаты их заполнения.
 _FIELD_SHORT = {"Сумма сделки": "Сумма", "UTM-метки": "UTM"}
+# Legacy-профиль демо; согласованный профиль из SLA.xlsx переопределяет на 10.
 RECONTACT_DAYS = 2
 
 
@@ -97,6 +98,8 @@ class Config:
     highlight_refusal: bool
     refuse_reason_mapped: bool
     required_custom: list[tuple[str, str]]
+    recontact_days: int
+    require_planned_task: bool
 
     @classmethod
     def parse(cls, data: dict) -> Config:
@@ -112,6 +115,13 @@ class Config:
             (k, _CUSTOM_LABELS.get(k, k))
             for k in (field_map.get("required") or []) if k in fm_fields
         ]
+        sla_rules = {
+            str(rule.get("key")): rule
+            for rule in (data.get("sla_profile") or {}).get("rules", [])
+            if rule.get("enabled", True)
+        }
+        if "first_touch" in sla_rules:
+            fc = sla_rules["first_touch"].get("minutes", fc)
         return cls(
             first_contact_min=int(fc),
             stuck_days=int(evaluative.get("stuck_days", 5)),
@@ -123,6 +133,10 @@ class Config:
             highlight_refusal=bool(evaluative.get("highlight_refusal", True)),
             refuse_reason_mapped="refuse_reason" in fm_fields,
             required_custom=required_custom,
+            recontact_days=int(
+                sla_rules.get("no_contact", {}).get("days", RECONTACT_DAYS)
+            ),
+            require_planned_task="planned_task" in sla_rules,
         )
 
 
@@ -172,6 +186,7 @@ def _mk(deal: Deal, ptype: str, *, over: bool, sla: str, norm: str, amount: int,
         "kind_label": label, "kind_class": cls,
         "name": f"{deal.name} · {deal.ref}" if deal.ref else deal.name,
         "ref": deal.ref, "mgr": deal.mgr, "src": _src_label(deal),
+        "deal_key": f"{deal.crm_source}:{deal.entity_type}:{deal.external_id or deal.id}",
         "norm": norm, "sla": sla, "over": over, "amount": amount, "ai": ai,
     }
 
@@ -258,7 +273,10 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
 
         # 3. Сделка без задачи на этапе, где задача обязательна
         rule_name = STAGE_TASK_RULE.get(stage)
-        if rule_name and cfg.task_rules.get(rule_name) and not _has_open_task(deal):
+        task_required = cfg.require_planned_task or bool(
+            rule_name and cfg.task_rules.get(rule_name)
+        )
+        if task_required and not _has_open_task(deal):
             elapsed = business_minutes(deal.stage_entered_at or deal.created_at or now, now, sched)
             regular.append(_mk(
                 deal, "no_task", over=elapsed > sched.day_minutes(),
@@ -271,7 +289,7 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
         # 4. Лид без повторного касания
         if not is_new_stage(stage) and deal.first_contact_at and deal.last_activity_at:
             days = calendar_days(deal.last_activity_at, now)
-            if days >= RECONTACT_DAYS:
+            if days >= cfg.recontact_days:
                 regular.append(_mk(
                     deal, "no_recontact", over=False, sla=format_days(days),
                     norm=f"{format_days(days)} без касания", amount=deal.amount,

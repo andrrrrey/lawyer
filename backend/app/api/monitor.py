@@ -33,11 +33,13 @@ async def get_review(session: AsyncSession = Depends(get_session)) -> list[dict[
 
 @router.post("/task")
 async def post_task(
-    ref: str = Body(..., embed=True),
+    payload: dict = Body(...),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        return await monitor.create_task_for(session, ref)
+        return await monitor.create_task_for(
+            session, ref=payload.get("ref"), deal_key=payload.get("deal_key")
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 — отказ Битрикс24/сети → 502 с причиной

@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -18,6 +27,11 @@ class Deal(Base):
     """
 
     __tablename__ = "deals"
+    __table_args__ = (
+        UniqueConstraint(
+            "crm_source", "entity_type", "external_id", name="uq_deal_crm_identity"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
@@ -26,6 +40,13 @@ class Deal(Base):
     ref: Mapped[str] = mapped_column(String(48), default="")  # «Лид #4821» / «Сделка #3390»
     # Идентификатор сделки в Битрикс24 (для привязки задачи к сделке — UF_CRM_TASK).
     external_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    # Технический источник нужен только для устранения коллизий ID между двумя
+    # Bitrix24. В пользовательском интерфейсе это не отдельный портал/тенант.
+    crm_source: Mapped[str] = mapped_column(String(32), default="primary")
+    entity_type: Mapped[str] = mapped_column(String(16), default="deal")
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
+    funnel_id: Mapped[str] = mapped_column(String(48), default="")
+    funnel_name: Mapped[str] = mapped_column(String(128), default="")
 
     name: Mapped[str] = mapped_column(String(255))
     src: Mapped[str] = mapped_column(String(64))
