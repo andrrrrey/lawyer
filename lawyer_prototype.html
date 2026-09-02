@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Banapal · AI-контроль лидов и маркетинговая аналитика</title>
+<title>Lawyer · AI-контроль лидов и маркетинговая аналитика</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -559,7 +559,7 @@ tr.rk-row-mid td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="logo">B</div>
-      <div><b>Banapal</b><span>Контроль лидов · Аналитика</span></div>
+      <div><b>Lawyer</b><span>Контроль лидов · Аналитика</span></div>
     </div>
     <nav class="nav" id="nav">
       <div class="nav-label">Обзор</div>
@@ -1511,7 +1511,7 @@ function downloadMinusXlsx(){
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,ws,'Минус-слова');
     const d=new Date().toISOString().slice(0,10);
-    XLSX.writeFile(wb,`minus-slova_banapal_${d}.xlsx`);
+    XLSX.writeFile(wb,`minus-slova_lawyer_${d}.xlsx`);
     // все не отклонённые помечаем выгруженными
     MW_DATA.forEach(r=>{if(r.status!=='rejected')r.status='exported';});
     renderMwTable();

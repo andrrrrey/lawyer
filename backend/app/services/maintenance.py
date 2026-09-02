@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services import integrations_config as cfg
 
-logger = get_logger("banapal.maintenance")
+logger = get_logger("lawyer.maintenance")
 
 
 def _now() -> str:

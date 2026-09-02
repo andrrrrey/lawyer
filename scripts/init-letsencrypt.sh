@@ -23,7 +23,7 @@ set -a; source .env; set +a
 DOMAIN="${DOMAIN:?DOMAIN не задан в .env}"
 EMAIL="${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL не задан в .env}"
 FORCE="${1:-}"
-# Доп. домены в сертификат (через пробел), напр. CERT_EXTRA_DOMAINS=www.banapal.futuguru.com
+# Доп. домены в сертификат (через пробел), напр. CERT_EXTRA_DOMAINS=www.lawyer.futuguru.com
 # в .env. У каждого доп. домена должна быть A-запись на этот VPS (иначе выпуск упадёт).
 EXTRA_DOMAINS="${CERT_EXTRA_DOMAINS:-}"
 ALL_DOMAINS="${DOMAIN} ${EXTRA_DOMAINS}"

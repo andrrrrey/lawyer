@@ -6,9 +6,9 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [project]
-name = "banapal-backend"
+name = "lawyer-backend"
 version = "0.1.0"
-description = "Banapal — AI-система контроля лидов и маркетинговой аналитики (backend)"
+description = "Lawyer — AI-система контроля лидов и маркетинговой аналитики (backend)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.115.6",

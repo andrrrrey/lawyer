@@ -15,7 +15,7 @@ from app.core.db import Base
 from app.models import Deal
 from app.services import sources as src_svc
 
-DB_PATH = pathlib.Path(tempfile.gettempdir()) / "banapal_sources_test.db"
+DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_sources_test.db"
 
 
 def test_canonical_source_folds_known_codes() -> None:

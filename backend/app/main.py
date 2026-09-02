@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.logging import get_logger
 
-logger = get_logger("banapal.api")
+logger = get_logger("lawyer.api")
 
 
 async def _autoseed_if_needed() -> None:
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Banapal API",
+    title="Lawyer API",
     description="AI-система контроля лидов и маркетинговой аналитики",
     version="0.1.0",
     lifespan=lifespan,

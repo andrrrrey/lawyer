@@ -43,7 +43,7 @@ from app.seeds.monitor import MANAGERS_CTRL
 from app.seeds.regulation import HISTORY, REGULATION
 from app.services.clock import to_msk
 
-logger = get_logger("banapal.seed")
+logger = get_logger("lawyer.seed")
 
 # Таблицы, очищаемые перед загрузкой (дети раньше родителей).
 _CLEAR_ORDER = [

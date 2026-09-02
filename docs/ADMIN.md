@@ -1,6 +1,6 @@
 # Администрирование и эксплуатация
 
-Все команды выполняются в каталоге проекта (`/opt/banapal`) на сервере.
+Все команды выполняются в каталоге проекта (`/opt/lawyer`) на сервере.
 Прод-профиль: `docker compose -f docker-compose.prod.yml <команда>`.
 
 ## Управление сервисами
@@ -27,11 +27,11 @@ docker compose -f docker-compose.prod.yml up -d --build   # миграции п�
 ./scripts/backup_db.sh
 
 # Восстановление из копии
-gunzip -c backups/banapal_<дата>.sql.gz | \
+gunzip -c backups/lawyer_<дата>.sql.gz | \
   docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
-Рекомендуется cron: `0 3 * * * cd /opt/banapal && ./scripts/backup_db.sh`.
+Рекомендуется cron: `0 3 * * * cd /opt/lawyer && ./scripts/backup_db.sh`.
 
 ## Переключение mock ↔ real
 - `DATA_SOURCE=mock` — демо-данные прототипа (для проверки интерфейса).
@@ -78,6 +78,6 @@ docker compose -f docker-compose.prod.yml run --rm --entrypoint \
 ```
 
 ## Диагностика
-- Здоровье API: `https://banapal.futuguru.com/api/health` и `/api/health/db`.
+- Здоровье API: `https://lawyer.futuguru.com/api/health` и `/api/health/db`.
 - Swagger (в dev): `http://localhost:8000/api/docs`.
 - Нет данных в боевом режиме — проверьте заполнение `.env` и логи `worker`/`api` после `ingest`.

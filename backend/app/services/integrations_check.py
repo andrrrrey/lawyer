@@ -19,7 +19,7 @@ import httpx
 from app.core.config import settings
 from app.core.logging import get_logger
 
-logger = get_logger("banapal.integrations")
+logger = get_logger("lawyer.integrations")
 
 # Короткие таймауты: тест подключения не должен «висеть».
 _TIMEOUT = httpx.Timeout(12.0, connect=6.0)

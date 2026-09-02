@@ -1,5 +1,5 @@
 # ============================================================================
-#  Banapal — базовая конфигурация Docker Compose.
+#  Lawyer — базовая конфигурация Docker Compose.
 #  Сервисы: db (PostgreSQL 16), api (FastAPI), worker (APScheduler), web (nginx).
 #  Запуск:  docker compose up --build
 #  Веб-интерфейс: http://localhost  (TLS/домен подключаются на Этапе E)

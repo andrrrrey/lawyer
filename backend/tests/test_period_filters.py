@@ -24,7 +24,7 @@ from app.core.db import Base
 from app.models import AdCost, Deal, Visit
 from app.services import analytics, metrics
 
-DB_PATH = pathlib.Path(tempfile.gettempdir()) / "banapal_period_test.db"
+DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_period_test.db"
 
 NOW = datetime.now(UTC)
 

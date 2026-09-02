@@ -19,7 +19,7 @@ from app.core.logging import get_logger
 from app.models import AiInsight, Baseline, BudgetRec, Channel
 from app.services import rec_style
 
-logger = get_logger("banapal.ai")
+logger = get_logger("lawyer.ai")
 
 
 async def _analytics_summary(session: AsyncSession) -> dict:

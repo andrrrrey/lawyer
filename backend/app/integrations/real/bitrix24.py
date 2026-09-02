@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.integrations.real._http import DEFAULT_TIMEOUT, request
 
-logger = get_logger("banapal.integrations")
+logger = get_logger("lawyer.integrations")
 
 _PAGE = 50
 

@@ -32,7 +32,7 @@ from app.models import (
     Visit,
 )
 
-logger = get_logger("banapal.data_mode")
+logger = get_logger("lawyer.data_mode")
 
 # Таблицы «витрин»/демо-контента, очищаемые при переходе на боевой режим
 # (дети раньше родителей). Реальные данные наполняются пересчётом/генерацией.

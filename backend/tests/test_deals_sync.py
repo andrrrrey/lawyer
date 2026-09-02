@@ -24,7 +24,7 @@ from app.integrations import factory
 from app.models import Deal, Task
 from app.services import ingest
 
-DB_PATH = pathlib.Path(tempfile.gettempdir()) / "banapal_sync_test.db"
+DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_sync_test.db"
 
 
 def _raw(deal_id: str, *, title: str, stage: str = "NEW", mgr: str = "12",

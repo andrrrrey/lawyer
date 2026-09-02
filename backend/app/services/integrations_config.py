@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models import IntegrationSettings
 
-logger = get_logger("banapal.integrations")
+logger = get_logger("lawyer.integrations")
 
 
 @dataclass(frozen=True)

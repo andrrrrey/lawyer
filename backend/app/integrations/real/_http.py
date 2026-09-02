@@ -18,7 +18,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from app.core.logging import get_logger
 
-logger = get_logger("banapal.integrations")
+logger = get_logger("lawyer.integrations")
 
 DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 

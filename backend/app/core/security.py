@@ -15,7 +15,7 @@ import jwt
 from app.core.config import settings
 
 ALGORITHM = "HS256"
-SESSION_COOKIE = "banapal_session"
+SESSION_COOKIE = "lawyer_session"
 
 
 def verify_credentials(login: str, password: str) -> bool:

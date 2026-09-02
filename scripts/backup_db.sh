@@ -17,12 +17,12 @@ KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 mkdir -p "$OUT_DIR"
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
-FILE="${OUT_DIR}/banapal_${STAMP}.sql.gz"
+FILE="${OUT_DIR}/lawyer_${STAMP}.sql.gz"
 
 echo "==> Создаю резервную копию: ${FILE}"
 $COMPOSE exec -T db pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" | gzip > "${FILE}"
 
 echo "==> Удаляю копии старше ${KEEP_DAYS} дней"
-find "$OUT_DIR" -name 'banapal_*.sql.gz' -mtime "+${KEEP_DAYS}" -delete || true
+find "$OUT_DIR" -name 'lawyer_*.sql.gz' -mtime "+${KEEP_DAYS}" -delete || true
 
 echo "Готово: ${FILE}"

@@ -20,7 +20,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.core.config import settings
 from app.core.logging import get_logger
 
-logger = get_logger("banapal.worker")
+logger = get_logger("lawyer.worker")
 
 
 def _sync_deals(full: bool) -> None:

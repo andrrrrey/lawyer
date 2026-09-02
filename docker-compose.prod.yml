@@ -1,5 +1,5 @@
 # ============================================================================
-#  Banapal — производственная конфигурация (VPS, домен, HTTPS/Let's Encrypt).
+#  Lawyer — производственная конфигурация (VPS, домен, HTTPS/Let's Encrypt).
 #  Запуск (после выпуска сертификата — см. docs/DEPLOYMENT.md):
 #      docker compose -f docker-compose.prod.yml up -d --build
 #  Первичный выпуск сертификата:  ./scripts/init-letsencrypt.sh

@@ -19,7 +19,7 @@ from app.core.logging import get_logger
 from app.integrations.real import _pg
 from app.integrations.real._http import DEFAULT_TIMEOUT, request
 
-logger = get_logger("banapal.integrations")
+logger = get_logger("lawyer.integrations")
 
 BASE = "https://api.moysklad.ru/api/remap/1.2"
 _PAGE = 1000

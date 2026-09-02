@@ -27,7 +27,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       <div className="brand">
         <div className="logo">B</div>
         <div>
-          <b>Banapal</b>
+          <b>Lawyer</b>
           <span>Контроль лидов и аналитика</span>
         </div>
       </div>

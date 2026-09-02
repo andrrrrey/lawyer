@@ -1,5 +1,5 @@
 # ============================================================================
-#  Banapal — БЫСТРОЕ развёртывание из готовых образов (GitHub Container Registry).
+#  Lawyer — БЫСТРОЕ развёртывание из готовых образов (GitHub Container Registry).
 #  Образы собираются в GitHub Actions; на VPS они только скачиваются — без
 #  компиляции. Это в разы быстрее сборки на слабом сервере.
 #
@@ -32,7 +32,7 @@ services:
       retries: 5
 
   api:
-    image: ${IMAGE_PREFIX:-ghcr.io/andrrrrey}/banapal-api:latest
+    image: ${IMAGE_PREFIX:-ghcr.io/andrrrrey}/lawyer-api:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -44,7 +44,7 @@ services:
       - "8000"
 
   worker:
-    image: ${IMAGE_PREFIX:-ghcr.io/andrrrrey}/banapal-api:latest
+    image: ${IMAGE_PREFIX:-ghcr.io/andrrrrey}/lawyer-api:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -54,7 +54,7 @@ services:
         condition: service_healthy
 
   web:
-    image: ${IMAGE_PREFIX:-ghcr.io/andrrrrey}/banapal-web:latest
+    image: ${IMAGE_PREFIX:-ghcr.io/andrrrrey}/lawyer-web:latest
     restart: unless-stopped
     depends_on:
       - api

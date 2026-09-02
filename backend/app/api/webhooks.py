@@ -29,7 +29,7 @@ from app.core.logging import get_logger
 from app.services import integrations_config as cfg
 from app.services import maintenance
 
-logger = get_logger("banapal.webhooks")
+logger = get_logger("lawyer.webhooks")
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 # Минимальный интервал между сверками по вебхуку (дебаунс всплесков). Сверка

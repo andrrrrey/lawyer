@@ -29,7 +29,7 @@ export default function LoginPage() {
         <div className="login-brand">
           <div className="logo">B</div>
           <div>
-            <b>Banapal</b>
+            <b>Lawyer</b>
             <span>Контроль лидов и маркетинговая аналитика</span>
           </div>
         </div>

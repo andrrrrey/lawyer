@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     public_url: str = "http://localhost"
 
     # --- База данных ---
-    postgres_user: str = "banapal"
-    postgres_password: str = "banapal"
-    postgres_db: str = "banapal"
+    postgres_user: str = "lawyer"
+    postgres_password: str = "lawyer"
+    postgres_db: str = "lawyer"
     postgres_host: str = "db"
     postgres_port: int = 5432
 

@@ -1,22 +1,22 @@
-# Развёртывание Banapal на VPS (домен banapal.futuguru.com)
+# Развёртывание Lawyer на VPS (домен lawyer.futuguru.com)
 
 Пошаговая инструкция запуска системы на сервере с HTTPS. Занимает ~20–30 минут.
 
 ## 0. Что потребуется
 - VPS: Ubuntu 22.04/24.04 LTS, 2–4 vCPU, 8 ГБ RAM, 60–80 ГБ SSD, root/SSH-доступ.
-- Домен **banapal.futuguru.com** с доступом к DNS-настройкам.
+- Домен **lawyer.futuguru.com** с доступом к DNS-настройкам.
 - Ключи API интеграций — см. [INTEGRATIONS.md](INTEGRATIONS.md) (можно заполнить позже: система стартует на демо-данных).
 
 ## 1. DNS: направить домен на сервер
 В панели управления доменом futuguru.com создайте **A-запись**:
 
 ```
-banapal.futuguru.com.   A   <IP_вашего_VPS>
+lawyer.futuguru.com.   A   <IP_вашего_VPS>
 ```
 
 Проверьте распространение (с локальной машины):
 ```bash
-dig +short banapal.futuguru.com   # должен вернуть IP вашего VPS
+dig +short lawyer.futuguru.com   # должен вернуть IP вашего VPS
 ```
 TLS-сертификат не выпустится, пока запись не указывает на сервер.
 
@@ -35,9 +35,9 @@ ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
 
 ## 3. Получить код
 ```bash
-git clone <URL_репозитория> /opt/banapal
-cd /opt/banapal
-git checkout claude/banapal-development-plan-9l0g7v   # ветка разработки
+git clone https://github.com/andrrrrey/lawyer.git /opt/lawyer
+cd /opt/lawyer
+git checkout main
 ```
 
 ## 4. Настроить окружение (.env)
@@ -46,7 +46,7 @@ cp .env.example .env
 nano .env
 ```
 Заполните минимум:
-- `DOMAIN=banapal.futuguru.com`, `PUBLIC_URL=https://banapal.futuguru.com`
+- `DOMAIN=lawyer.futuguru.com`, `PUBLIC_URL=https://lawyer.futuguru.com`
 - `LETSENCRYPT_EMAIL=<ваш e-mail>`
 - `POSTGRES_PASSWORD`, `ADMIN_LOGIN`, `ADMIN_PASSWORD` — задайте надёжные значения
 - `SESSION_SECRET` — сгенерируйте: `openssl rand -hex 32`
@@ -65,7 +65,7 @@ nano .env
 ### Вариант A — готовые образы из реестра (быстро) ⭐
 Предпосылки: workflow `.github/workflows/docker-images.yml` собрал образы (вкладка
 **Actions** в GitHub — зелёная галочка). Сделайте образы в GHCR **публичными**
-(Packages → banapal-api / banapal-web → Package settings → Change visibility → Public)
+(Packages → lawyer-api / lawyer-web → Package settings → Change visibility → Public)
 **или** авторизуйтесь на сервере:
 `echo <GITHUB_PAT c read:packages> | docker login ghcr.io -u <логин> --password-stdin`.
 
@@ -87,7 +87,7 @@ docker compose up -d --build
 применяются автоматически), `worker` (планировщик), `web` (nginx + фронтенд, HTTPS),
 `certbot` (автопродление).
 
-Откройте **https://banapal.futuguru.com** → страница входа → логин/пароль из `.env`.
+Откройте **https://lawyer.futuguru.com** → страница входа → логин/пароль из `.env`.
 
 > `init-letsencrypt.sh` требует, чтобы DNS (шаг 1) уже указывал на сервер и порт 80
 > был открыт. По умолчанию скрипт берёт `docker-compose.registry.yml`; для сборки
@@ -125,12 +125,12 @@ docker compose exec api python -m app.services.ingest
 ## 8. Резервное копирование
 Ручной бэкап БД:
 ```bash
-./scripts/backup_db.sh          # создаст backups/banapal_<дата>.sql.gz
+./scripts/backup_db.sh          # создаст backups/lawyer_<дата>.sql.gz
 ```
 Автоматически (ежедневно в 03:00) — добавьте в crontab:
 ```bash
 crontab -e
-# 0 3 * * * cd /opt/banapal && ./scripts/backup_db.sh >> /var/log/banapal-backup.log 2>&1
+# 0 3 * * * cd /opt/lawyer && ./scripts/backup_db.sh >> /var/log/lawyer-backup.log 2>&1
 ```
 
 ## Проверка и обслуживание
@@ -140,7 +140,7 @@ crontab -e
 - Подробнее — [ADMIN.md](ADMIN.md).
 
 ## Частые вопросы
-- **Сертификат не выпустился** — проверьте `dig +short banapal.futuguru.com` (должен быть IP VPS) и что порт 80 открыт. Если в логе `too many certificates ... in the last 168h` — это лимит Let's Encrypt: дождитесь времени, указанного в ошибке (`retry after ...`), и запустите `./scripts/init-letsencrypt.sh` снова. Не перевыпускайте сертификат ради обновлений кода — для них есть `./scripts/update.sh`.
+- **Сертификат не выпустился** — проверьте `dig +short lawyer.futuguru.com` (должен быть IP VPS) и что порт 80 открыт. Если в логе `too many certificates ... in the last 168h` — это лимит Let's Encrypt: дождитесь времени, указанного в ошибке (`retry after ...`), и запустите `./scripts/init-letsencrypt.sh` снова. Не перевыпускайте сертификат ради обновлений кода — для них есть `./scripts/update.sh`.
 - **Браузер пишет `NET::ERR_CERT_AUTHORITY_INVALID`** — nginx отдаёт временный самоподписанный сертификат (боевой не выпущен или удалён). Выпустите боевой: `./scripts/init-letsencrypt.sh` (при активном лимите — после окончания недельного окна).
 - **Упёрлись в лимит Let's Encrypt, а сайт нужен сейчас** — лимит считается на *точный набор доменов*. Добавьте в сертификат ещё один домен, и это будет новый набор (свой лимит): создайте A-запись `www.<домен>` → IP VPS, укажите в `.env` `CERT_EXTRA_DOMAINS=www.<домен>` и запустите `./scripts/init-letsencrypt.sh`. Сертификат выпустится на оба домена сразу. У каждого домена в сертификате должна быть A-запись на этот VPS — иначе проверка не пройдёт.
 - **Не скачался Russian Trusted CA при сборке** (нужен для API росс. сервисов) — см. раздел «Russian Trusted CA» в [ADMIN.md](ADMIN.md).

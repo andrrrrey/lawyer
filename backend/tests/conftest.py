@@ -21,7 +21,7 @@ from app.core.db import Base, get_session
 from app.main import app
 from app.seed import seed_all
 
-DB_PATH = pathlib.Path(tempfile.gettempdir()) / "banapal_test.db"
+DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_test.db"
 
 
 @pytest.fixture(scope="session")

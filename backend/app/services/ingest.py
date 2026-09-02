@@ -38,7 +38,7 @@ from app.services import period as per
 from app.services import rec_style, romi
 from app.services import sources as src_svc
 
-logger = get_logger("banapal.ingest")
+logger = get_logger("lawyer.ingest")
 
 # Тип колбэка прогресса: получает короткий текст шага.
 Progress = Callable[[str], Awaitable[None]]

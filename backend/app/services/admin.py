@@ -74,7 +74,7 @@ def validate_config(data: Any) -> None:
     if not isinstance(data, dict):
         raise ValueError("Конфигурация должна быть объектом")
     for tr in data.get("thresholds", []):
-        if not isinstance(tr.get("v"), (int, float)):
+        if not isinstance(tr.get("v"), int | float):
             raise ValueError(f"Порог «{tr.get('n')}» должен быть числом")
     stuck = data.get("evaluative", {}).get("stuck_days")
     if stuck is not None and (not isinstance(stuck, int) or stuck < 1):
