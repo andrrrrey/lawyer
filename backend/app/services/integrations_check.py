@@ -329,10 +329,14 @@ def check_onec() -> dict:
     password = settings.onec_password or ""
     if not endpoint or not username or not password:
         return _missing("Не указаны endpoint, логин или пароль 1С.")
+    now = datetime.now()
+    date_to = now.strftime("%Y-%m-%dT00:00:00")
+    date_from = (now - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00")
     try:
-        response = httpx.get(
+        response = httpx.post(
             endpoint,
             auth=httpx.BasicAuth(username, password),
+            json={"ДатаНачала": date_from, "ДатаОкончания": date_to},
             timeout=_TIMEOUT,
             follow_redirects=_FOLLOW,
         )

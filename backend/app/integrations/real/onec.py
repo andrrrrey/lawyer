@@ -18,6 +18,21 @@ def _first(raw: dict, *keys: str, default: Any = "") -> Any:
     return default
 
 
+def _object(raw: dict, *keys: str) -> dict:
+    value = _first(raw, *keys, default={})
+    return value if isinstance(value, dict) else {}
+
+
+def _iso_midnight(value: str | None) -> str | None:
+    """Приводит дату периода к ISO-виду, который требует HTTP-сервис 1С."""
+    if not value:
+        return None
+    text = str(value).strip()
+    if "T" not in text:
+        return f"{text}T00:00:00"
+    return text
+
+
 def _money(value: Any) -> Decimal:
     text = str(value or "0").strip().replace(" ", "").replace(",", ".")
     try:
@@ -37,48 +52,179 @@ def _crm_type(value: Any) -> str:
 
 def normalize_receipt(raw: dict) -> dict:
     """Нормализует русские и технические имена полей ответа 1С."""
+    registrar = _object(raw, "Регистратор", "registrar")
+    organization = _object(raw, "Организация", "organization")
+    counterparty = _object(raw, "Контрагент", "counterparty")
+    contract = _object(raw, "Договор", "contract")
+    article = _object(raw, "СтатьяДДС", "article")
+    order = _object(raw, "Заказ", "order")
     return {
         "registrar_id": str(
-            _first(raw, "registrar_id", "РегистраторУИД", "Регистратор", "registrarId")
+            _first(
+                registrar,
+                "ИД",
+                "УИД",
+                "id",
+                default=_first(raw, "registrar_id", "РегистраторУИД", "registrarId"),
+            )
         ),
         "registrar_number": str(
-            _first(raw, "registrar_number", "НомерРегистратора", "Номер", "registrarNumber")
+            _first(
+                registrar,
+                "Номер",
+                "number",
+                default=_first(raw, "registrar_number", "НомерРегистратора", "registrarNumber"),
+            )
         ),
         "registrar_type": str(
-            _first(raw, "registrar_type", "ТипРегистратора", "ВидДокумента", "registrarType")
+            _first(
+                registrar,
+                "Тип",
+                "type",
+                default=_first(
+                    raw,
+                    "registrar_type",
+                    "ТипРегистратора",
+                    "ВидДокумента",
+                    "registrarType",
+                ),
+            )
         ),
         "registrar_date": _first(
-            raw, "registrar_date", "ДатаРегистратора", "Дата", "registrarDate", default=None
+            registrar,
+            "Дата",
+            "date",
+            default=_first(
+                raw,
+                "registrar_date",
+                "ДатаРегистратора",
+                "Дата",
+                "Период",
+                "registrarDate",
+                default=None,
+            ),
         ),
         "organization_id": str(
-            _first(raw, "organization_id", "ОрганизацияУИД", "organizationId")
+            _first(
+                organization,
+                "ИД",
+                "УИД",
+                "id",
+                default=_first(raw, "organization_id", "ОрганизацияУИД", "organizationId"),
+            )
         ),
         "organization_name": str(
-            _first(raw, "organization_name", "Организация", "organizationName")
+            _first(
+                organization,
+                "Наименование",
+                "name",
+                default=_first(raw, "organization_name", "organizationName"),
+            )
         ),
         "organization_inn": str(
-            _first(raw, "organization_inn", "ИННОрганизации", "organizationInn")
+            _first(
+                organization,
+                "ИНН",
+                "inn",
+                default=_first(raw, "organization_inn", "ИННОрганизации", "organizationInn"),
+            )
         ),
         "counterparty_id": str(
-            _first(raw, "counterparty_id", "КонтрагентУИД", "counterpartyId")
+            _first(
+                counterparty,
+                "ИД",
+                "УИД",
+                "id",
+                default=_first(raw, "counterparty_id", "КонтрагентУИД", "counterpartyId"),
+            )
         ),
         "counterparty_name": str(
-            _first(raw, "counterparty_name", "Контрагент", "counterpartyName")
+            _first(
+                counterparty,
+                "Наименование",
+                "name",
+                default=_first(raw, "counterparty_name", "counterpartyName"),
+            )
         ),
         "counterparty_inn": str(
-            _first(raw, "counterparty_inn", "ИННКонтрагента", "counterpartyInn")
+            _first(
+                counterparty,
+                "ИНН",
+                "inn",
+                default=_first(raw, "counterparty_inn", "ИННКонтрагента", "counterpartyInn"),
+            )
         ),
-        "contract_id": str(_first(raw, "contract_id", "ДоговорУИД", "contractId")),
-        "contract_number": str(_first(raw, "contract_number", "Договор", "contractNumber")),
-        "article_id": str(_first(raw, "article_id", "СтатьяДДСУИД", "articleId")),
-        "article_code": str(_first(raw, "article_code", "КодСтатьиДДС", "articleCode")),
-        "article_name": str(_first(raw, "article_name", "СтатьяДДС", "articleName")).strip(),
+        "contract_id": str(
+            _first(
+                contract,
+                "ИД",
+                "УИД",
+                "id",
+                default=_first(raw, "contract_id", "ДоговорУИД", "contractId"),
+            )
+        ),
+        "contract_number": str(
+            _first(
+                contract,
+                "Номер",
+                "number",
+                default=_first(raw, "contract_number", "contractNumber"),
+            )
+        ),
+        "article_id": str(
+            _first(
+                article,
+                "ИД",
+                "УИД",
+                "id",
+                default=_first(raw, "article_id", "СтатьяДДСУИД", "articleId"),
+            )
+        ),
+        "article_code": str(
+            _first(
+                article,
+                "Код",
+                "code",
+                default=_first(raw, "article_code", "КодСтатьиДДС", "articleCode"),
+            )
+        ),
+        "article_name": str(
+            _first(
+                article,
+                "Наименование",
+                "name",
+                default=_first(raw, "article_name", "СтатьяДДС", "articleName"),
+            )
+        ).strip(),
         "amount": _money(_first(raw, "amount", "Сумма", "sum")),
         "currency": str(_first(raw, "currency", "Валюта", default="RUB")),
-        "crm_external_id": str(_first(raw, "Код_BTX", "code_btx", "crmExternalId")),
-        "crm_entity_type": _crm_type(
-            _first(raw, "Тип_BTX", "type_btx", "crmEntityType")
+        "crm_external_id": str(
+            _first(
+                counterparty,
+                "Код_BTX",
+                "code_btx",
+                default=_first(
+                    order,
+                    "Код_BTX",
+                    "code_btx",
+                    default=_first(raw, "Код_BTX", "code_btx", "crmExternalId"),
+                ),
+            )
         ),
+        "crm_entity_type": _crm_type(
+            _first(
+                counterparty,
+                "Тип_BTX",
+                "type_btx",
+                default=_first(
+                    order,
+                    "Тип_BTX",
+                    "type_btx",
+                    default=_first(raw, "Тип_BTX", "type_btx", "crmEntityType"),
+                ),
+            )
+        ),
+        "row_number": str(_first(raw, "НомерСтроки", "row_number", "rowNumber")),
         "raw": raw,
     }
 
@@ -116,20 +262,17 @@ class RealOneCAdapter:
     ) -> list[dict]:
         if not self.endpoint or not self.username or not self.password:
             raise RuntimeError("Не заданы endpoint, логин или пароль 1С")
-        # Не добавляем к endpoint произвольные параметры: сервис используется
-        # ровно в форме из ТЗ. При необходимости периода endpoint может содержать
-        # явные шаблоны {date_from}/{date_to}.
-        url = self.endpoint
-        if date_from:
-            url = url.replace("{date_from}", date_from)
-        if date_to:
-            url = url.replace("{date_to}", date_to)
+        payload = {
+            "ДатаНачала": _iso_midnight(date_from),
+            "ДатаОкончания": _iso_midnight(date_to),
+        }
+        payload = {key: value for key, value in payload.items() if value is not None}
         with httpx.Client(
             timeout=DEFAULT_TIMEOUT,
             auth=httpx.BasicAuth(self.username, self.password),
             follow_redirects=True,
         ) as client:
-            response = request("GET", url, client=client)
+            response = request("POST", self.endpoint, client=client, json=payload)
         try:
             payload = response.json()
         except ValueError as exc:

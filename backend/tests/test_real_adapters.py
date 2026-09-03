@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.integrations.real import bitrix24, calltouch, moysklad, yandex_direct, yandex_metrika
+from app.integrations.real import bitrix24, calltouch, moysklad, onec, yandex_direct, yandex_metrika
 
 
 def test_direct_parse_tsv() -> None:
@@ -23,6 +23,33 @@ def test_bitrix_normalize_deal() -> None:
     assert d["name"] == "ООО «ТеплоДом»"
     assert d["amount"] == 145000
     assert d["stage"] == "C1:PREPARATION"
+
+
+def test_onec_uses_post_with_iso_period_body(monkeypatch) -> None:
+    calls: list[tuple[str, str, dict]] = []
+
+    class FakeResponse:
+        @staticmethod
+        def json() -> dict:
+            return {"result": []}
+
+    def fake_request(method, url, *, client, **kwargs):
+        calls.append((method, url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(onec, "request", fake_request)
+    adapter = onec.RealOneCAdapter(
+        endpoint="http://1c.example/receipts", username="user", password="secret"
+    )
+    assert adapter.fetch_receipts("2026-08-01", "2026-08-31") == []
+    assert calls == [(
+        "POST",
+        "http://1c.example/receipts",
+        {"json": {
+            "ДатаНачала": "2026-08-01T00:00:00",
+            "ДатаОкончания": "2026-08-31T00:00:00",
+        }},
+    )]
 
 
 def test_metrika_parse_visits() -> None:

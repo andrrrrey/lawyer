@@ -53,6 +53,13 @@ Progress = Callable[[str], Awaitable[None]]
 # датам работала для всех периодов, а не только для 30 дней.
 _DEALS_WINDOW_DAYS = per.WINDOW_DAYS
 
+_ONEC_INCOME_TYPES = {
+    "ПоступлениеНаСчет",
+    "ПоступлениеВКассу",
+    "ОперацияПоПлатежнымКартам",
+    "ЧекККМ",
+}
+
 
 def _parse_dt(value: str | None) -> datetime | None:
     """Безопасный разбор ISO-даты Битрикс24 (с таймзоной) в datetime."""
@@ -404,8 +411,11 @@ def classify_receipts(rows: list[dict], config: dict) -> list[dict]:
         operation = business.receipt_article_operation(
             config, entity_key, str(row.get("article_name", ""))
         )
+        registrar_type = str(row.get("registrar_type", "")).strip()
         reason = ""
-        if counterparty_inn and counterparty_inn in own_inns:
+        if registrar_type not in _ONEC_INCOME_TYPES:
+            reason = "unsupported_registrar_type" if registrar_type else "missing_registrar_type"
+        elif counterparty_inn and counterparty_inn in own_inns:
             reason = "internal_transfer"
         elif not entity_key:
             reason = "unknown_legal_entity"
@@ -429,6 +439,7 @@ def _receipt_identity(row: dict) -> str:
             "registrar_id",
             "registrar_number",
             "registrar_type",
+            "row_number",
             "registrar_date",
             "organization_id",
             "counterparty_id",

@@ -19,6 +19,11 @@ def test_defaults_contain_three_entities_and_exact_visible_articles() -> None:
     assert len(entities["uo"]["dds_articles"]) == 11
     assert len(entities["csv"]["dds_articles"]) == 8
     assert len(entities["urpase"]["dds_articles"]) == 8
+    assert {key: item["inn"] for key, item in entities.items()} == {
+        "uo": "6686064870",
+        "csv": "6686094579",
+        "urpase": "6671469916",
+    }
     assert receipt_article_operation(BUSINESS_SETTINGS, "uo", "ЭРобокасса") == "income"
     # Нечёткое/регистронезависимое сопоставление намеренно запрещено.
     assert receipt_article_operation(BUSINESS_SETTINGS, "uo", "эробокасса") is None
@@ -62,17 +67,74 @@ def test_onec_payload_normalization_preserves_money_and_btx_fields() -> None:
     assert rows[0]["crm_external_id"] == "991"
 
 
+def test_onec_nested_payload_from_specification_is_normalized() -> None:
+    rows = parse_receipts({"result": [{
+        "Период": "2026-08-18T23:59:59",
+        "Регистратор": {
+            "ИД": "reg-1",
+            "Номер": "АБУА-000347",
+            "Дата": "2026-08-18T23:59:59",
+            "Тип": "ПоступлениеНаСчет",
+        },
+        "НомерСтроки": "1",
+        "Организация": {
+            "ИД": "org-1",
+            "Наименование": "Юридический омбудсмен",
+            "ИНН": "6686064870",
+        },
+        "Контрагент": {
+            "ИД": "customer-1",
+            "Наименование": "Клиент",
+            "ИНН": "6600000000",
+            "Код_BTX": "991",
+            "Тип_BTX": "Сделка",
+        },
+        "Договор": {"ИД": "contract-1", "Номер": "2"},
+        "СтатьяДДС": {
+            "ИД": "article-1",
+            "Код": "УА-000625",
+            "Наименование": "Юридические услуги",
+        },
+        "Сумма": 2070,
+    }]})
+    assert rows[0] | {"raw": None} == {
+        "registrar_id": "reg-1",
+        "registrar_number": "АБУА-000347",
+        "registrar_type": "ПоступлениеНаСчет",
+        "registrar_date": "2026-08-18T23:59:59",
+        "organization_id": "org-1",
+        "organization_name": "Юридический омбудсмен",
+        "organization_inn": "6686064870",
+        "counterparty_id": "customer-1",
+        "counterparty_name": "Клиент",
+        "counterparty_inn": "6600000000",
+        "contract_id": "contract-1",
+        "contract_number": "2",
+        "article_id": "article-1",
+        "article_code": "УА-000625",
+        "article_name": "Юридические услуги",
+        "amount": Decimal("2070.00"),
+        "currency": "RUB",
+        "crm_external_id": "991",
+        "crm_entity_type": "deal",
+        "row_number": "1",
+        "raw": None,
+    }
+
+
 def test_receipts_exclude_internal_transfer_and_unknown_article() -> None:
     data = deepcopy(BUSINESS_SETTINGS)
     data["legal_entities"][0]["inn"] = "1000000001"
     data["legal_entities"][1]["inn"] = "1000000002"
     rows = classify_receipts([
         {
+            "registrar_type": "ПоступлениеНаСчет",
             "organization_inn": "1000000001",
             "counterparty_inn": "1000000002",
             "article_name": "Юридические услуги",
         },
         {
+            "registrar_type": "ПоступлениеНаСчет",
             "organization_inn": "1000000001",
             "counterparty_inn": "5000000000",
             "article_name": "Неизвестная статья",
@@ -80,6 +142,17 @@ def test_receipts_exclude_internal_transfer_and_unknown_article() -> None:
     ], data)
     assert rows[0]["exclusion_reason"] == "internal_transfer"
     assert rows[1]["exclusion_reason"] == "unknown_dds_article"
+
+
+def test_receipts_exclude_non_income_registrar_types() -> None:
+    rows = classify_receipts([{
+        "registrar_type": "ЧекККМВозврат",
+        "organization_inn": "6686064870",
+        "counterparty_inn": "6600000000",
+        "article_name": "Юридические услуги",
+    }], BUSINESS_SETTINGS)
+    assert rows[0]["excluded"] is True
+    assert rows[0]["exclusion_reason"] == "unsupported_registrar_type"
 
 
 def test_business_settings_api(client) -> None:

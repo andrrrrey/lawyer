@@ -82,11 +82,24 @@ def recompute_analytics() -> None:
 
 
 def refresh_ai_insights() -> None:
-    """Генерация AI-инсайтов по расписанию (не на каждое событие).
+    """Еженедельная генерация AI-инсайтов и рекомендаций по бюджету."""
+    import asyncio
 
-    В mock/при ненастроенном LLM используются текущие данные (раздел 3.6 ТЗ).
-    """
-    logger.info("Генерация AI-инсайтов — mock/без LLM, используются текущие данные")
+    from app.services import maintenance
+
+    try:
+        result = asyncio.run(maintenance.generate_ai())
+    except Exception as exc:  # noqa: BLE001 — джоба не должна ронять планировщик
+        logger.error("Генерация AI-инсайтов: ошибка %s", exc)
+        return
+    if result.get("generated"):
+        logger.info(
+            "AI-инсайты обновлены: инсайтов=%s рекомендаций=%s",
+            result.get("insights", 0),
+            result.get("budget_recs", 0),
+        )
+    else:
+        logger.info("Генерация AI-инсайтов пропущена: %s", result.get("reason"))
 
 
 def build_scheduler() -> BackgroundScheduler:
@@ -101,9 +114,17 @@ def build_scheduler() -> BackgroundScheduler:
         ingest_sources, "interval", hours=1, id="ingest_sources",
         max_instances=1, coalesce=True,
     )
-    # Ночное окно: пересчёт аналитики и генерация AI-инсайтов.
+    # Ночной пересчёт выполняется ежедневно; агрегированный AI-разбор — раз в
+    # неделю, как требует ТЗ, чтобы не вызывать модель на каждое событие.
     scheduler.add_job(recompute_analytics, "cron", hour=3, minute=0, id="recompute_analytics")
-    scheduler.add_job(refresh_ai_insights, "cron", hour=3, minute=30, id="refresh_ai_insights")
+    scheduler.add_job(
+        refresh_ai_insights,
+        "cron",
+        day_of_week="mon",
+        hour=3,
+        minute=30,
+        id="refresh_ai_insights",
+    )
     return scheduler
 
 

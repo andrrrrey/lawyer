@@ -39,7 +39,7 @@ BUSINESS_SETTINGS: dict = {
         {
             "key": "uo",
             "name": "ЮО",
-            "inn": "",
+            "inn": "6686064870",
             "kpp": "",
             "enabled": True,
             "position": 0,
@@ -48,7 +48,7 @@ BUSINESS_SETTINGS: dict = {
         {
             "key": "csv",
             "name": "ЦСВ",
-            "inn": "",
+            "inn": "6686094579",
             "kpp": "",
             "enabled": True,
             "position": 1,
@@ -57,7 +57,7 @@ BUSINESS_SETTINGS: dict = {
         {
             "key": "urpase",
             "name": "УрПАСЭ",
-            "inn": "",
+            "inn": "6671469916",
             "kpp": "",
             "enabled": True,
             "position": 2,
