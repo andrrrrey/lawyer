@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api import (
     admin,
@@ -34,6 +35,11 @@ async def _autoseed_if_needed() -> None:
 
     try:
         async with SessionLocal() as session:
+            # Gunicorn запускает несколько процессов одновременно. В PostgreSQL
+            # транзакционная advisory-блокировка не даёт им параллельно заполнить
+            # одну и ту же пустую БД и получить конфликт первичных ключей.
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                await session.execute(text("SELECT pg_advisory_xact_lock(12021988)"))
             if await is_empty(session):
                 logger.info("БД пуста — загружаю демо-данные (DATA_SOURCE=mock)")
                 await seed_all(session)

@@ -33,6 +33,12 @@ services:
         condition: service_healthy
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   worker:
     build:
@@ -42,7 +48,7 @@ services:
     environment:
       RUN_MODE: worker
     depends_on:
-      db:
+      api:
         condition: service_healthy
 
   web:
@@ -50,7 +56,8 @@ services:
       context: ./frontend
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "80:80"
 
