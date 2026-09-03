@@ -66,6 +66,10 @@ def client(engine, session_maker):
         return None
 
     main_module._autoseed_if_needed = _noop
+    # Lifespan использует глобальный SessionLocal, а не dependency override.
+    # Не читаем сохранённые production-доступы при изолированном API-тесте и не
+    # позволяем им переключить settings.data_source с mock на real.
+    main_module._apply_integration_overrides = _noop
 
     with TestClient(app) as c:
         resp = c.post("/api/auth/login", json={"login": "admin", "password": "admin"})
