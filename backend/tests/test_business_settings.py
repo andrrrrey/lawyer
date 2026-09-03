@@ -9,7 +9,11 @@ import pytest
 
 from app.integrations.real.onec import normalize_receipt, parse_receipts
 from app.seeds.business import BUSINESS_SETTINGS
-from app.services.business_settings import receipt_article_operation, validate_settings
+from app.services.business_settings import (
+    employee_names_for_source,
+    receipt_article_operation,
+    validate_settings,
+)
 from app.services.ingest import classify_receipts
 
 
@@ -45,6 +49,25 @@ def test_funnel_references_are_validated() -> None:
     }]
     with pytest.raises(ValueError, match="источник Bitrix24"):
         validate_settings(data)
+
+
+def test_employee_names_are_scoped_by_bitrix_connection() -> None:
+    data = deepcopy(BUSINESS_SETTINGS)
+    data["employees"] = [
+        {
+            "key": "box_12", "name": "Иван Иванов", "crm_source": "box",
+            "bitrix_user_id": "12", "legal_entity_key": "", "department_key": "",
+            "enabled": True,
+        },
+        {
+            "key": "cloud_12", "name": "Пётр Петров", "crm_source": "cloud",
+            "bitrix_user_id": "12", "legal_entity_key": "", "department_key": "",
+            "enabled": True,
+        },
+    ]
+
+    assert employee_names_for_source(data, "box") == {"12": "Иван Иванов"}
+    assert employee_names_for_source(data, "cloud") == {"12": "Пётр Петров"}
 
 
 def test_onec_payload_normalization_preserves_money_and_btx_fields() -> None:

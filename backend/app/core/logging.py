@@ -22,6 +22,10 @@ def setup_logging(level: int = logging.INFO) -> None:
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers = [handler]
+    # httpx пишет полный URL запроса, а у входящего вебхука Bitrix секрет входит
+    # прямо в путь. Не допускаем появления таких URL в production-логах.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     _CONFIGURED = True
 
 

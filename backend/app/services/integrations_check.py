@@ -106,7 +106,30 @@ def _check_bitrix_connection(url: str) -> dict:
     except ValueError:
         return _err(f"Bitrix24 вернул не JSON (HTTP {resp.status_code}).")
     if resp.status_code == 200 and isinstance(data, dict) and not data.get("error"):
-        return _ok("Доступ Bitrix24 подтверждён.")
+        # Одного profile недостаточно: CRM может читаться, а ФИО ответственных —
+        # нет. Для user.get входящему вебхуку нужен минимальный scope user_brief.
+        try:
+            users_resp = httpx.post(
+                f"{base}/user.get.json",
+                json={"FILTER": {"ACTIVE": True}},
+                timeout=_TIMEOUT,
+                follow_redirects=_FOLLOW,
+            )
+            users_data = users_resp.json()
+        except (ValueError, httpx.HTTPError):
+            users_resp = None
+            users_data = {"error": "user_scope_unavailable"}
+        if (
+            users_resp is None
+            or users_resp.status_code in (401, 403)
+            or (isinstance(users_data, dict) and users_data.get("error"))
+        ):
+            return _err(
+                "CRM доступна, но ФИО сотрудников недоступны.",
+                "Добавьте входящему вебхуку право «Пользователи (кратко)» "
+                "(scope user_brief), затем повторите проверку и пересчёт.",
+            )
+        return _ok("Доступ Bitrix24 и справочник сотрудников подтверждены.")
     if resp.status_code in (401, 403):
         return _err("Вебхук Bitrix24 недействителен или не имеет прав.")
     return _err(f"Bitrix24 вернул HTTP {resp.status_code}.")

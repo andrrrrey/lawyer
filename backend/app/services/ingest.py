@@ -117,7 +117,7 @@ def _deal_from_bitrix(
     mgr_id = str(nd.get("mgr") or "").strip()
     if mgr_id == "0":
         mgr_id = ""
-    mgr = (users or {}).get(mgr_id) or mgr_id or "—"
+    mgr = (users or {}).get(mgr_id) or (f"Сотрудник #{mgr_id}" if mgr_id else "—")
     contact_id = str(nd.get("contact_id") or "").strip()
     phone = (phones or {}).get(contact_id)
     src_code = str(nd.get("src") or "").strip()
@@ -494,7 +494,8 @@ def _apply_deal_fields(target: Deal, fresh: Deal) -> None:
 
 
 async def _bitrix_dictionaries(
-    deals: list[dict], progress: Progress | None = None, adapter=None
+    deals: list[dict], progress: Progress | None = None, adapter=None,
+    manual_users: dict[str, str] | None = None,
 ) -> tuple[dict, dict, dict, dict]:
     """Справочники сотрудников/стадий/источников и телефоны контактов (best-effort)."""
     b24 = adapter or factory.get_bitrix24()
@@ -508,6 +509,9 @@ async def _bitrix_dictionaries(
         users = {u["id"]: u["name"] for u in b24.fetch_users()}
     except Exception as exc:  # noqa: BLE001 — имена необязательны
         logger.warning("Битрикс24: справочник сотрудников недоступен: %s", exc)
+    # Ручное соответствие из настроек перекрывает справочник портала: так ФИО
+    # можно исправить даже при вебхуке без scope user_brief.
+    users.update(manual_users or {})
     try:
         stages = {x["id"]: x["name"] for x in b24.fetch_stages()}
     except Exception as exc:  # noqa: BLE001 — названия стадий необязательны
@@ -564,7 +568,11 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
             raw = adapter.fetch_deals(modified_after=since, extra_fields=extra_fields)
         for item in raw:
             item["crm_source"] = source_key
-        dictionaries = await _bitrix_dictionaries(raw, adapter=adapter)
+        dictionaries = await _bitrix_dictionaries(
+            raw,
+            adapter=adapter,
+            manual_users=business.employee_names_for_source(business_config, source_key),
+        )
         batches.append((source_key, raw, dictionaries, _open_action_ids(raw, adapter)))
 
     existing = {
@@ -699,7 +707,12 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
             deals.extend(source_deals)
             if sources[f"bitrix_{source_key}"]["status"] == "ok":
                 dictionaries = await _bitrix_dictionaries(
-                    source_deals, progress, adapter=adapter
+                    source_deals,
+                    progress,
+                    adapter=adapter,
+                    manual_users=business.employee_names_for_source(
+                        business_config, source_key
+                    ),
                 )
                 bitrix_context[source_key] = (
                     *dictionaries,

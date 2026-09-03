@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import {
   useAttention, useFunnel, useKpis, useLeads, useManagers,
-  useRevenueSeries, useRomiByChannel, useSources,
+  useSources,
 } from "@/api/dashboard";
 import { AttentionBlock } from "@/components/AttentionBlock";
 import { EChart } from "@/components/EChart";
@@ -12,7 +12,7 @@ import { KpiRow } from "@/components/KpiRow";
 import { LeadsTable } from "@/components/LeadsTable";
 import { ManagersTable } from "@/components/ManagersTable";
 import {
-  donutOption, funnelOption, revenueOption, romiBarOption,
+  donutOption, funnelOption,
 } from "@/components/chartOptions";
 import { useFilters } from "@/state/filters";
 
@@ -38,8 +38,6 @@ export default function DashboardPage() {
   const attention = useAttention(q);
   const funnel = useFunnel(q);
   const sources = useSources(q);
-  const revenue = useRevenueSeries(q);
-  const romi = useRomiByChannel(q);
   const managers = useManagers(q);
   const leads = useLeads(f.mgr, f.source, f.leadFilter, f.period, f.legalEntity);
 
@@ -54,15 +52,6 @@ export default function DashboardPage() {
         </ChartCard>
         <ChartCard title="Источники лидов" sub="по источнику сделки">
           {sources.data ? <EChart option={donutOption(sources.data)} height={280} /> : <Spin />}
-        </ChartCard>
-      </div>
-
-      <div className="grid two-b" style={{ marginTop: 16 }}>
-        <ChartCard title="Выручка и маржа" sub="динамика по дням, ₽">
-          {revenue.data ? <EChart option={revenueOption(revenue.data)} height={260} /> : <Spin />}
-        </ChartCard>
-        <ChartCard title="ROMI по каналам" sub="возврат на рекламу">
-          {romi.data ? <EChart option={romiBarOption(romi.data)} height={260} /> : <Spin />}
         </ChartCard>
       </div>
 

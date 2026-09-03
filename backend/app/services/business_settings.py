@@ -86,6 +86,10 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Воронка ссылается на неизвестный профиль SLA")
 
     for employee in employees:
+        crm_source = str(employee.get("crm_source", "")).strip()
+        if crm_source and crm_source not in source_keys:
+            raise ValueError("Сотрудник ссылается на неизвестный источник Bitrix24")
+        employee["crm_source"] = crm_source
         entity_key = str(employee.get("legal_entity_key", ""))
         if entity_key and entity_key not in entity_keys:
             raise ValueError("Сотрудник ссылается на неизвестное юридическое лицо")
@@ -102,6 +106,27 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("План ссылается на неизвестное юридическое лицо")
 
     result["schema_version"] = 1
+    return result
+
+
+def employee_names_for_source(data: dict[str, Any], crm_source: str) -> dict[str, str]:
+    """Ручной справочник ID → ФИО для портала Bitrix24.
+
+    Используется как fallback, когда вебхуку не выдан минимальный scope
+    ``user_brief`` и метод ``user.get`` недоступен.
+    """
+    result: dict[str, str] = {}
+    for employee in data.get("employees", []):
+        source = str(employee.get("crm_source", "")).strip()
+        user_id = str(employee.get("bitrix_user_id", "")).strip()
+        name = str(employee.get("name", "")).strip()
+        if (
+            employee.get("enabled", True)
+            and user_id
+            and name
+            and source in ("", crm_source)
+        ):
+            result[user_id] = name
     return result
 
 

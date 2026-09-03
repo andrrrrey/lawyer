@@ -33,6 +33,7 @@ export interface Department { key: string; name: string; enabled: boolean }
 export interface Employee {
   key: string;
   name: string;
+  crm_source: string;
   bitrix_user_id: string;
   legal_entity_key: string;
   department_key: string;
