@@ -1,14 +1,18 @@
-import { App, Button, Input, InputNumber, Select, Spin, Switch, Table, Tabs, Tag } from "antd";
+import { Alert, App, Button, Input, InputNumber, Select, Spin, Switch, Table, Tabs, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   type BusinessSettings,
+  type BitrixFunnelOption,
   type DdsArticle,
   type Funnel,
+  useBitrixFunnels,
   useBusinessSettings,
   useOneCReceiptJournal,
   useSaveBusinessSettings,
 } from "@/api/businessSettings";
+import AdminPage from "@/pages/AdminPage";
 
 const uid = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -25,9 +29,11 @@ const inputStyle = { minWidth: 150 };
 
 export default function BusinessSettingsPage() {
   const query = useBusinessSettings();
+  const bitrixFunnels = useBitrixFunnels();
   const save = useSaveBusinessSettings();
   const receipts = useOneCReceiptJournal();
   const { message } = App.useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [draft, setDraft] = useState<BusinessSettings | null>(null);
 
   useEffect(() => { if (query.data) setDraft(structuredClone(query.data)); }, [query.data]);
@@ -41,10 +47,49 @@ export default function BusinessSettingsPage() {
     setDraft((current) => { const next = structuredClone(current!); fn(next); return next; });
   };
   const entityOptions = draft.legal_entities.map((x) => ({ value: x.key, label: x.name }));
-  const sourceOptions = draft.crm_sources.map((x) => ({ value: x.key, label: x.name }));
   const slaOptions = draft.sla_profiles.map((x) => ({ value: x.key, label: x.name }));
   const departmentOptions = draft.departments.map((x) => ({ value: x.key, label: x.name }));
   const employeeOptions = draft.employees.map((x) => ({ value: x.key, label: x.name }));
+
+  const toggleFunnel = (
+    sourceKey: string,
+    funnel: BitrixFunnelOption,
+    enabled: boolean,
+  ) => mutate((next) => {
+    const index = next.funnels.findIndex(
+      (item) => item.crm_source === sourceKey && item.external_id === funnel.id,
+    );
+    if (!enabled) {
+      if (index >= 0) next.funnels.splice(index, 1);
+      return;
+    }
+    if (index >= 0) {
+      next.funnels[index].enabled = true;
+      next.funnels[index].name = funnel.name;
+      return;
+    }
+    next.funnels.push({
+      key: `funnel_${sourceKey}_${funnel.id}`,
+      external_id: funnel.id,
+      name: funnel.name,
+      crm_source: sourceKey,
+      legal_entity_key: next.legal_entities[0]?.key ?? "",
+      sla_profile_key: next.sla_profiles[0]?.key ?? "default",
+      enabled: true,
+    } satisfies Funnel);
+  });
+
+  const updateFunnel = (
+    sourceKey: string,
+    externalId: string,
+    field: "legal_entity_key" | "sla_profile_key",
+    value: string,
+  ) => mutate((next) => {
+    const item = next.funnels.find(
+      (row) => row.crm_source === sourceKey && row.external_id === externalId,
+    );
+    if (item) item[field] = value;
+  });
 
   const settingsTabs = [
     {
@@ -72,37 +117,93 @@ export default function BusinessSettingsPage() {
     },
     {
       key: "funnels", label: "Воронки", children: (
-        <Card title="Соответствие воронок" subtitle="внутренний источник Bitrix24 × воронка → юрлицо и SLA">
-          {draft.funnels.map((funnel, index) => (
-            <div className="setrow" key={funnel.key} style={{ gap: 8, flexWrap: "wrap" }}>
-              <Input style={inputStyle} placeholder="Название" value={funnel.name} onChange={(e) => mutate((x) => { x.funnels[index].name = e.target.value; })} />
-              <Input style={{ width: 130 }} placeholder="ID воронки" value={funnel.external_id} onChange={(e) => mutate((x) => { x.funnels[index].external_id = e.target.value; })} />
-              <Select style={{ width: 190 }} options={sourceOptions} value={funnel.crm_source} onChange={(v) => mutate((x) => { x.funnels[index].crm_source = v; })} />
-              <Select style={{ width: 120 }} options={entityOptions} value={funnel.legal_entity_key} onChange={(v) => mutate((x) => { x.funnels[index].legal_entity_key = v; })} />
-              <Select style={{ width: 180 }} options={slaOptions} value={funnel.sla_profile_key} onChange={(v) => mutate((x) => { x.funnels[index].sla_profile_key = v; })} />
-              <Switch checked={funnel.enabled} onChange={(v) => mutate((x) => { x.funnels[index].enabled = v; })} />
-              <Button danger onClick={() => mutate((x) => { x.funnels.splice(index, 1); })}>Удалить</Button>
-            </div>
-          ))}
-          <Button onClick={() => mutate((x) => x.funnels.push({ key: uid("funnel"), external_id: "", name: "Новая воронка", crm_source: x.crm_sources[0]?.key ?? "", legal_entity_key: x.legal_entities[0]?.key ?? "", sla_profile_key: x.sla_profiles[0]?.key ?? "default", enabled: true } satisfies Funnel))}>Добавить воронку</Button>
+        <Card title="Воронки Bitrix24" subtitle="выберите используемые воронки и укажите их юрлицо и SLA">
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <Button loading={bitrixFunnels.isFetching} onClick={() => bitrixFunnels.refetch()}>
+              Обновить список из Bitrix24
+            </Button>
+          </div>
+          {bitrixFunnels.isLoading ? <Spin /> : null}
+          {(bitrixFunnels.data?.sources ?? []).map((source) => {
+            const discoveredIds = new Set(source.funnels.map((item) => item.id));
+            const savedOnly: BitrixFunnelOption[] = draft.funnels
+              .filter((item) => item.crm_source === source.key && !discoveredIds.has(item.external_id))
+              .map((item) => ({ id: item.external_id, name: item.name, is_default: false, sort: 0 }));
+            const options = [...source.funnels, ...savedOnly];
+            return (
+              <div key={source.key} style={{ borderTop: "1px solid var(--line2)", paddingTop: 14, marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <b>{source.name}</b>
+                  <Tag color={source.ok ? "green" : source.configured ? "red" : "default"}>
+                    {source.ok ? `Получено: ${source.funnels.length}` : source.configured ? "Ошибка подключения" : "Не настроен"}
+                  </Tag>
+                </div>
+                {!source.ok && source.error ? <Alert type="warning" showIcon message={source.error} style={{ marginBottom: 10 }} /> : null}
+                {options.length === 0 && source.ok ? <Alert type="info" showIcon message="В этом Bitrix24 нет доступных воронок сделок." /> : null}
+                {options.map((option) => {
+                  const selected = draft.funnels.find(
+                    (item) => item.crm_source === source.key && item.external_id === option.id,
+                  );
+                  const unavailable = !discoveredIds.has(option.id);
+                  return (
+                    <div className="setrow" key={`${source.key}:${option.id}`} style={{ gap: 10, flexWrap: "wrap" }}>
+                      <Switch
+                        checked={!!selected?.enabled}
+                        checkedChildren="Выбрана"
+                        unCheckedChildren="Не выбрана"
+                        onChange={(checked) => toggleFunnel(source.key, option, checked)}
+                      />
+                      <div className="st" style={{ minWidth: 240 }}>
+                        <b>{option.name} {option.is_default ? <Tag>основная</Tag> : null}</b>
+                        <span>ID: {option.id}{unavailable ? " · сохранена, но сейчас не найдена в Bitrix24" : ""}</span>
+                      </div>
+                      <Select
+                        style={{ width: 150 }}
+                        placeholder="Юрлицо"
+                        disabled={!selected?.enabled}
+                        options={entityOptions}
+                        value={selected?.legal_entity_key}
+                        onChange={(value) => updateFunnel(source.key, option.id, "legal_entity_key", value)}
+                      />
+                      <Select
+                        style={{ width: 210 }}
+                        placeholder="Профиль SLA"
+                        disabled={!selected?.enabled}
+                        options={slaOptions}
+                        value={selected?.sla_profile_key}
+                        onChange={(value) => updateFunnel(source.key, option.id, "sla_profile_key", value)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </Card>
       ),
     },
     {
       key: "sla", label: "SLA и регламенты", children: (
-        <>{draft.sla_profiles.map((profile, profileIndex) => (
-          <Card key={profile.key} title={profile.name} subtitle="правила из файла SLA.xlsx; исходная нумерация сохранена">
-            {profile.rules.map((rule, ruleIndex) => (
-              <div className="setrow" key={rule.key} style={{ alignItems: "flex-start", gap: 12 }}>
-                <b style={{ minWidth: 28 }}>№{rule.source_number}</b>
-                <div style={{ flex: 1 }}><Input value={rule.name} onChange={(e) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].name = e.target.value; })} /><Input.TextArea style={{ marginTop: 8 }} value={rule.description} onChange={(e) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].description = e.target.value; })} /></div>
-                {rule.minutes !== undefined ? <InputNumber addonAfter="мин." min={1} value={rule.minutes} onChange={(v) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].minutes = v ?? 1; })} /> : null}
-                {rule.days !== undefined ? <InputNumber addonAfter="дн." min={1} value={rule.days} onChange={(v) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].days = v ?? 1; })} /> : null}
-                <Switch checked={rule.enabled} onChange={(v) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].enabled = v; })} />
-              </div>
-            ))}
-          </Card>
-        ))}</>
+        <Tabs type="card" items={[
+          {
+            key: "sla-profiles",
+            label: "SLA по воронкам",
+            children: <>{draft.sla_profiles.map((profile, profileIndex) => (
+              <Card key={profile.key} title={profile.name} subtitle="правила из файла SLA.xlsx; исходная нумерация сохранена">
+                {profile.rules.map((rule, ruleIndex) => (
+                  <div className="setrow" key={rule.key} style={{ alignItems: "flex-start", gap: 12 }}>
+                    <b style={{ minWidth: 28 }}>№{rule.source_number}</b>
+                    <div style={{ flex: 1 }}><Input value={rule.name} onChange={(e) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].name = e.target.value; })} /><Input.TextArea style={{ marginTop: 8 }} value={rule.description} onChange={(e) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].description = e.target.value; })} /></div>
+                    {rule.minutes !== undefined ? <InputNumber addonAfter="мин." min={1} value={rule.minutes} onChange={(v) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].minutes = v ?? 1; })} /> : null}
+                    {rule.days !== undefined ? <InputNumber addonAfter="дн." min={1} value={rule.days} onChange={(v) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].days = v ?? 1; })} /> : null}
+                    <Switch checked={rule.enabled} onChange={(v) => mutate((x) => { x.sla_profiles[profileIndex].rules[ruleIndex].enabled = v; })} />
+                  </div>
+                ))}
+              </Card>
+            ))}</>,
+          },
+          { key: "control", label: "Параметры контроля CRM", children: <AdminPage /> },
+        ]} />
       ),
     },
     {
@@ -141,5 +242,8 @@ export default function BusinessSettingsPage() {
     },
   ];
 
-  return <><Tabs items={settingsTabs} /><div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}><Button disabled={!dirty} onClick={() => setDraft(structuredClone(query.data!))}>Сбросить</Button><Button type="primary" disabled={!dirty} loading={save.isPending} onClick={() => save.mutateAsync(draft).then(() => message.success("Настройки сохранены")).catch((e: Error) => message.error(e.message))}>Сохранить настройки</Button></div></>;
+  const requestedTab = searchParams.get("tab") ?? "entities";
+  const activeTab = settingsTabs.some((item) => item.key === requestedTab) ? requestedTab : "entities";
+
+  return <><Tabs activeKey={activeTab} onChange={(tab) => setSearchParams({ tab })} items={settingsTabs} /><div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}><Button disabled={!dirty} onClick={() => setDraft(structuredClone(query.data!))}>Сбросить</Button><Button type="primary" disabled={!dirty} loading={save.isPending} onClick={() => save.mutateAsync(draft).then(() => message.success("Настройки сохранены")).catch((e: Error) => message.error(e.message))}>Сохранить настройки</Button></div></>;
 }

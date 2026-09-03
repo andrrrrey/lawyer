@@ -77,6 +77,30 @@ export function useBusinessSettings() {
   });
 }
 
+export interface BitrixFunnelOption {
+  id: string;
+  name: string;
+  is_default: boolean;
+  sort: number;
+}
+
+export interface BitrixFunnelSource {
+  key: string;
+  name: string;
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  funnels: BitrixFunnelOption[];
+}
+
+export function useBitrixFunnels() {
+  return useQuery<{ sources: BitrixFunnelSource[] }>({
+    queryKey: ["integrations", "bitrix", "funnels"],
+    queryFn: () => api.get("/integrations/bitrix/funnels"),
+    staleTime: 60_000,
+  });
+}
+
 export function useSaveBusinessSettings() {
   const qc = useQueryClient();
   return useMutation({

@@ -71,14 +71,6 @@ export const NAV_ITEMS: NavItem[] = [
     Icon: AdminIcon,
   },
   {
-    key: "admin",
-    path: "/admin",
-    label: "Регламент (старый)",
-    subtitle: "Настройка параметров контроля без разработчика",
-    section: "Настройка",
-    Icon: AdminIcon,
-  },
-  {
     key: "integrations",
     path: "/integrations",
     label: "Интеграции",

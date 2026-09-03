@@ -32,6 +32,9 @@ class MockBitrix24Adapter:
         # В mock ответственные уже заданы именами в демо-сделках.
         return []
 
+    def fetch_funnels(self) -> list[dict]:
+        return []
+
     def fetch_stages(self) -> list[dict]:
         # В mock стадии уже заданы читаемыми названиями в демо-сделках.
         return []

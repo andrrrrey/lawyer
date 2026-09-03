@@ -161,3 +161,17 @@ def test_business_settings_api(client) -> None:
     assert [item["name"] for item in response.json()["legal_entities"]] == [
         "ЮО", "ЦСВ", "УрПАСЭ"
     ]
+
+
+def test_bitrix_funnels_api_lists_both_connections(client, monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "bitrix_box_webhook_url", "")
+    monkeypatch.setattr(settings, "bitrix_cloud_webhook_url", "")
+    response = client.get("/api/integrations/bitrix/funnels")
+
+    assert response.status_code == 200
+    assert [(item["key"], item["configured"]) for item in response.json()["sources"]] == [
+        ("box", False),
+        ("cloud", False),
+    ]

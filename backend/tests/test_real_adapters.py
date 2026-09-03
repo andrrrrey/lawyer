@@ -142,6 +142,22 @@ def test_bitrix_fetch_stages_and_sources_split_by_entity(monkeypatch) -> None:
     assert sources == {"site": "Сайт", "NEW": "Звонок"}
 
 
+def test_bitrix_fetch_funnels_normalizes_category_list(monkeypatch) -> None:
+    monkeypatch.setattr(bitrix24, "_rest", lambda method, payload: {
+        "categories": [
+            {"id": 9, "name": "Экспертиза", "sort": 200, "isDefault": "N"},
+            {"id": 0, "name": "Общая", "sort": 100, "isDefault": "Y"},
+        ]
+    })
+
+    funnels = bitrix24.RealBitrix24Adapter().fetch_funnels()
+
+    assert funnels == [
+        {"id": "0", "name": "Общая", "is_default": True, "sort": 100},
+        {"id": "9", "name": "Экспертиза", "is_default": False, "sort": 200},
+    ]
+
+
 def _rest_stub(calls: list[tuple[str, dict]], *, deal_responsible: str = "12"):
     """Заглушка REST: сделка с ответственным, создание задачи и дела, справочник имён."""
     def fake_rest(method: str, payload: dict):

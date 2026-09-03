@@ -109,6 +109,53 @@ async def bitrix_schema(
     return await run_in_threadpool(_load)
 
 
+@router.get("/bitrix/funnels")
+async def bitrix_funnels(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Воронки сделок из обоих настроенных порталов Bitrix24.
+
+    Справочник доступен и в демонстрационном режиме: это позволяет сначала
+    сохранить вебхуки и выбрать нужные воронки, а уже затем включить боевые данные.
+    URL вебхуков и тексты сетевых исключений наружу не возвращаются.
+    """
+    await cfg.apply_overrides_from_db(session)
+
+    def _load() -> dict[str, Any]:
+        from app.integrations.real.bitrix24 import RealBitrix24Adapter
+
+        connections = [
+            ("box", "Коробочный Bitrix24", settings.bitrix_box_webhook_url),
+            ("cloud", "Облачный Bitrix24", settings.bitrix_cloud_webhook_url),
+        ]
+        sources: list[dict[str, Any]] = []
+        for key, name, webhook_url in connections:
+            configured = bool((webhook_url or "").strip())
+            item: dict[str, Any] = {
+                "key": key,
+                "name": name,
+                "configured": configured,
+                "ok": False,
+                "funnels": [],
+            }
+            if not configured:
+                item["error"] = "Сначала сохраните URL входящего вебхука в интеграциях."
+            else:
+                try:
+                    item["funnels"] = RealBitrix24Adapter(
+                        webhook_url=webhook_url, source_key=key
+                    ).fetch_funnels()
+                    item["ok"] = True
+                except Exception:  # noqa: BLE001 — безопасное сообщение без URL/токена
+                    item["error"] = (
+                        "Не удалось получить воронки. Проверьте вебхук и право чтения CRM."
+                    )
+            sources.append(item)
+        return {"sources": sources}
+
+    return await run_in_threadpool(_load)
+
+
 @router.get("/moysklad/schema")
 async def moysklad_schema(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     """Структура Postgres-реплики `mpdb`: таблицы и колонки (для сопоставления)."""

@@ -208,6 +208,27 @@ class RealBitrix24Adapter:
             out.append({"id": str(uid), "name": name or f"ID {uid}"})
         return out
 
+    def fetch_funnels(self) -> list[dict]:
+        """Актуальные воронки сделок из ``crm.category.list``.
+
+        Метод возвращает объект ``result.categories``, а не обычный список,
+        поэтому здесь используется одиночный REST-вызов вместо ``_call``.
+        """
+        result = self._rest("crm.category.list", {"entityTypeId": 2})
+        categories = result.get("categories", []) if isinstance(result, dict) else []
+        funnels: list[dict] = []
+        for category in categories:
+            if not isinstance(category, dict) or category.get("id") is None:
+                continue
+            funnel_id = str(category["id"])
+            funnels.append({
+                "id": funnel_id,
+                "name": str(category.get("name") or f"Воронка {funnel_id}"),
+                "is_default": str(category.get("isDefault") or "").upper() == "Y",
+                "sort": int(category.get("sort") or 0),
+            })
+        return sorted(funnels, key=lambda item: (item["sort"], item["name"]))
+
     def fetch_stages(self) -> list[dict]:
         """Справочник стадий воронки: [{"id", "name"}] для резолва STAGE_ID → название.
 

@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { RequireAuth } from "@/auth/RequireAuth";
 import { AppLayout } from "@/layout/AppLayout";
-import AdminPage from "@/pages/AdminPage";
 import AiPage from "@/pages/AiPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import BusinessSettingsPage from "@/pages/BusinessSettingsPage";
@@ -23,7 +22,7 @@ export function App() {
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/romi" element={<RomiPage />} />
           <Route path="/ai" element={<AiPage />} />
-          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/admin" element={<Navigate to="/settings?tab=sla" replace />} />
           <Route path="/settings" element={<BusinessSettingsPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
         </Route>

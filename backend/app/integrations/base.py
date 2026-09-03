@@ -34,6 +34,7 @@ class Bitrix24Adapter(Protocol):
     # external_id сделок, у которых есть открытая задача или дело в Битрикс24.
     def fetch_open_action_deal_ids(self, deal_ids: list[str]) -> set[str]: ...
     def fetch_users(self) -> list[dict]: ...  # [{"id","name"}] для резолва ответственных
+    def fetch_funnels(self) -> list[dict]: ...  # [{"id","name","is_default"}] воронки
     def fetch_stages(self) -> list[dict]: ...  # [{"id","name"}] стадии воронки
     def fetch_sources(self) -> list[dict]: ...  # [{"id","name"}] источники лидов
     def fetch_contact_phones(self, contact_ids: list[str]) -> dict[str, str]: ...
