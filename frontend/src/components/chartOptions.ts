@@ -1,7 +1,7 @@
 // Построители опций ECharts — перенос конфигураций из прототипа.
 import type { EChartsOption } from "echarts";
 
-import type { FunnelStage, RevenueSeries, RomiByChannel, Source } from "@/api/dashboard";
+import type { ExpenseByArticle, FunnelStage, RevenueSeries, RomiByChannel, Source } from "@/api/dashboard";
 import type { CampaignBubble, RomiChannelChart } from "@/api/romi";
 
 // Вертикальный градиент для областей (объектная форма — без полного echarts).
@@ -86,6 +86,20 @@ export function romiBarOption(rows: RomiByChannel[]): EChartsOption {
       type: "bar", barWidth: "52%",
       data: data.map((v) => ({ value: v, itemStyle: { color: v >= 200 ? "#12B76A" : v >= 80 ? "#F79009" : "#F04438", borderRadius: [0, 6, 6, 0] } })),
       label: { show: true, position: "right", formatter: "{c}%", color: "#6B7488", fontSize: 11, fontFamily: "Space Grotesk", fontWeight: 600 },
+    }],
+  };
+}
+
+export function expensesBarOption(rows: ExpenseByArticle[]): EChartsOption {
+  return {
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, valueFormatter: (v) => rub(v as number) },
+    grid: { left: 8, right: 16, top: 8, bottom: 4, containLabel: true },
+    xAxis: { type: "value", ...AXIS, ...SPLIT, axisLabel: { color: "#8A92A6", fontSize: 11, formatter: (v: number) => v >= 1e6 ? `${v / 1e6}M` : `${v / 1e3}k` } },
+    yAxis: { type: "category", data: rows.map((x) => x.article).reverse(), ...AXIS, axisLabel: { color: "#6B7488", fontSize: 10, width: 150, overflow: "truncate" } },
+    series: [{
+      type: "bar", barWidth: "52%",
+      data: rows.map((x) => ({ value: x.amount, itemStyle: { color: x.source === "automatic" ? "#635BFF" : "#E0803B", borderRadius: [0, 6, 6, 0] } })).reverse(),
+      label: { show: true, position: "right", formatter: (p: unknown) => rub(Number((p as { value: number }).value)), color: "#6B7488", fontSize: 10 },
     }],
   };
 }

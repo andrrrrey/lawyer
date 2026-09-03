@@ -2,8 +2,8 @@ import { Spin } from "antd";
 import type { ReactNode } from "react";
 
 import {
-  useAttention, useFunnel, useKpis, useLeads, useManagers,
-  useSources,
+  useAttention, useExpensesByArticle, useFunnel, useKpis, useLeads, useManagers,
+  useRomiByChannel, useSources,
 } from "@/api/dashboard";
 import { AttentionBlock } from "@/components/AttentionBlock";
 import { EChart } from "@/components/EChart";
@@ -12,7 +12,7 @@ import { KpiRow } from "@/components/KpiRow";
 import { LeadsTable } from "@/components/LeadsTable";
 import { ManagersTable } from "@/components/ManagersTable";
 import {
-  donutOption, funnelOption,
+  donutOption, expensesBarOption, funnelOption, romiBarOption,
 } from "@/components/chartOptions";
 import { useFilters } from "@/state/filters";
 
@@ -38,6 +38,8 @@ export default function DashboardPage() {
   const attention = useAttention(q);
   const funnel = useFunnel(q);
   const sources = useSources(q);
+  const expenses = useExpensesByArticle(q);
+  const romi = useRomiByChannel(q);
   const managers = useManagers(q);
   const leads = useLeads(f.mgr, f.source, f.leadFilter, f.period, f.legalEntity);
 
@@ -52,6 +54,23 @@ export default function DashboardPage() {
         </ChartCard>
         <ChartCard title="Источники лидов" sub="по источнику сделки">
           {sources.data ? <EChart option={donutOption(sources.data)} height={280} /> : <Spin />}
+        </ChartCard>
+      </div>
+
+      <div className="grid two-b" style={{ marginTop: 16 }}>
+        <ChartCard title="Расходы по статьям" sub="Директ автоматически + ручной журнал">
+          {!expenses.data ? <Spin /> : expenses.data.length ? (
+            <EChart option={expensesBarOption(expenses.data)} height={260} />
+          ) : (
+            <EmptyState title="Расходов пока нет" hint="Данные Яндекс Директа появятся после подключения. Остальные статьи можно добавить вручную в разделе «Настройки → Расходы»." />
+          )}
+        </ChartCard>
+        <ChartCard title="ROMI по каналам" sub="фактические поступления 1С против рекламных расходов">
+          {!romi.data ? <Spin /> : romi.data.length ? (
+            <EChart option={romiBarOption(romi.data)} height={260} />
+          ) : (
+            <EmptyState title="ROMI пока не рассчитан" hint="Нужны рекламные расходы с каналом и связанные с кампаниями фактические поступления 1С." />
+          )}
         </ChartCard>
       </div>
 

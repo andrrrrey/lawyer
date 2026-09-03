@@ -132,6 +132,43 @@ def test_admin_regulation_and_history(client: TestClient) -> None:
     assert len(hist) == 4
 
 
+def test_manual_expense_crud(client: TestClient) -> None:
+    created = client.post("/api/admin/expenses", json={
+        "spent_at": "2026-09-03",
+        "legal_entity_key": "uo",
+        "article": "Реклама в Авито",
+        "amount": 12500.50,
+        "include_in_romi": True,
+        "channel": "Авито",
+        "campaign": "Юридические услуги",
+        "comment": "Ручная корректировка",
+    })
+    assert created.status_code == 201
+    row = created.json()
+    assert row["article"] == "Реклама в Авито"
+    assert row["amount"] == 12500.5
+
+    listed = client.get("/api/admin/expenses").json()
+    assert any(item["id"] == row["id"] for item in listed)
+
+    assert client.delete(f"/api/admin/expenses/{row['id']}").status_code == 200
+    assert all(
+        item["id"] != row["id"] for item in client.get("/api/admin/expenses").json()
+    )
+
+
+def test_manual_romi_expense_requires_channel(client: TestClient) -> None:
+    response = client.post("/api/admin/expenses", json={
+        "spent_at": "2026-09-03",
+        "legal_entity_key": "uo",
+        "article": "Реклама",
+        "amount": 1000,
+        "include_in_romi": True,
+        "channel": "",
+    })
+    assert response.status_code == 422
+
+
 def test_requires_auth() -> None:
     # Отдельный клиент без входа — защищённые эндпоинты возвращают 401.
     with TestClient(app) as anon:

@@ -24,11 +24,17 @@ export interface MinusWords {
   items: MinusWord[];
 }
 
-export const useRomiChannels = () =>
-  useQuery<RomiChannelChart[]>({ queryKey: ["romi", "by-channel"], queryFn: () => api.get("/romi/by-channel") });
+const qs = (period: string, legalEntity: string) => {
+  const q = new URLSearchParams({ period });
+  if (legalEntity && legalEntity !== "all") q.set("legal_entity", legalEntity);
+  return q.toString();
+};
 
-export const useCampaignsBubble = () =>
-  useQuery<CampaignBubble[]>({ queryKey: ["romi", "campaigns"], queryFn: () => api.get("/romi/campaigns") });
+export const useRomiChannels = (period: string, legalEntity: string) =>
+  useQuery<RomiChannelChart[]>({ queryKey: ["romi", "by-channel", period, legalEntity], queryFn: () => api.get(`/romi/by-channel?${qs(period, legalEntity)}`) });
+
+export const useCampaignsBubble = (period: string, legalEntity: string) =>
+  useQuery<CampaignBubble[]>({ queryKey: ["romi", "campaigns", period, legalEntity], queryFn: () => api.get(`/romi/campaigns?${qs(period, legalEntity)}`) });
 
 export const useBudgetRecs = () =>
   useQuery<BudgetRec[]>({ queryKey: ["romi", "budget-recs"], queryFn: () => api.get("/romi/budget-recs") });

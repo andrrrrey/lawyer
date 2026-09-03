@@ -7,6 +7,7 @@ import {
 import { EChart } from "@/components/EChart";
 import { EmptyState } from "@/components/EmptyState";
 import { bubbleOption, romiSpendMarginOption } from "@/components/chartOptions";
+import { useFilters } from "@/state/filters";
 
 const MS_STATUS: Record<string, [string, string]> = {
   new: ["Новое", "ms-new"], accepted: ["Принято", "ms-ok"],
@@ -49,8 +50,9 @@ function RecCard({ r }: { r: BudgetRec }) {
 }
 
 export default function RomiPage() {
-  const romiCh = useRomiChannels();
-  const bubble = useCampaignsBubble();
+  const filters = useFilters();
+  const romiCh = useRomiChannels(filters.period, filters.legalEntity);
+  const bubble = useCampaignsBubble(filters.period, filters.legalEntity);
   const recs = useBudgetRecs();
   const mw = useMinusWords();
   const { message } = App.useApp();

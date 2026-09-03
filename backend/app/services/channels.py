@@ -15,14 +15,20 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AdCost, Deal, OneCReceipt
+from app.models import AdCost, Deal, ManualExpense, OneCReceipt
 from app.services import ingest
 from app.services import period as per
 
 
 async def has_daily_costs(session: AsyncSession) -> bool:
-    """Есть ли посуточное сырьё Директа (иначе период применить не к чему)."""
-    return bool(await session.scalar(select(func.count()).select_from(AdCost)))
+    """Есть ли датированные расходы Директа или ручные рекламные расходы."""
+    direct = await session.scalar(select(func.count()).select_from(AdCost))
+    manual = await session.scalar(
+        select(func.count()).select_from(ManualExpense).where(
+            ManualExpense.include_in_romi.is_(True)
+        )
+    )
+    return bool(direct or manual)
 
 
 def deal_row(deal: Deal) -> dict:
@@ -68,6 +74,29 @@ async def for_period(
         }
         for c in costs
     ]
+
+    manual_where = [
+        ManualExpense.include_in_romi.is_(True),
+        ManualExpense.spent_at >= start,
+    ]
+    if end is not None:
+        manual_where.append(ManualExpense.spent_at < end)
+    if legal_entity and legal_entity != "all":
+        manual_where.append(ManualExpense.legal_entity_key == legal_entity)
+    manual = (
+        await session.execute(select(ManualExpense).where(*manual_where))
+    ).scalars().all()
+    cost_rows.extend(
+        {
+            "campaign": row.campaign or row.article,
+            "campaign_id": None,
+            "channel": row.channel,
+            "spend": round(row.amount),
+            "clicks": 0,
+            "impressions": 0,
+        }
+        for row in manual
+    )
 
     stmt = select(Deal).where(Deal.created_at.is_not(None), Deal.created_at >= start)
     if end is not None:

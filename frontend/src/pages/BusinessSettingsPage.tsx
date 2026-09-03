@@ -1,4 +1,5 @@
-import { Alert, App, Button, Input, InputNumber, Select, Spin, Switch, Table, Tabs, Tag } from "antd";
+import { Alert, App, Button, DatePicker, Input, InputNumber, Popconfirm, Select, Spin, Switch, Table, Tabs, Tag } from "antd";
+import dayjs from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -9,6 +10,9 @@ import {
   type Funnel,
   useBitrixFunnels,
   useBusinessSettings,
+  useCreateManualExpense,
+  useDeleteManualExpense,
+  useManualExpenses,
   useOneCReceiptJournal,
   useSaveBusinessSettings,
 } from "@/api/businessSettings";
@@ -32,9 +36,16 @@ export default function BusinessSettingsPage() {
   const bitrixFunnels = useBitrixFunnels();
   const save = useSaveBusinessSettings();
   const receipts = useOneCReceiptJournal();
+  const expenses = useManualExpenses();
+  const createExpense = useCreateManualExpense();
+  const deleteExpense = useDeleteManualExpense();
   const { message } = App.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const [draft, setDraft] = useState<BusinessSettings | null>(null);
+  const [expenseDraft, setExpenseDraft] = useState({
+    spent_at: dayjs().format("YYYY-MM-DD"), legal_entity_key: "", article: "",
+    amount: 0, include_in_romi: false, channel: "", campaign: "", comment: "",
+  });
 
   useEffect(() => { if (query.data) setDraft(structuredClone(query.data)); }, [query.data]);
   const dirty = useMemo(
@@ -50,6 +61,22 @@ export default function BusinessSettingsPage() {
   const slaOptions = draft.sla_profiles.map((x) => ({ value: x.key, label: x.name }));
   const departmentOptions = draft.departments.map((x) => ({ value: x.key, label: x.name }));
   const employeeOptions = draft.employees.map((x) => ({ value: x.key, label: x.name }));
+
+  const addExpense = async () => {
+    const payload = {
+      ...expenseDraft,
+      legal_entity_key: expenseDraft.legal_entity_key || draft.legal_entities[0]?.key || "",
+    };
+    try {
+      await createExpense.mutateAsync(payload);
+      setExpenseDraft((current) => ({
+        ...current, article: "", amount: 0, channel: "", campaign: "", comment: "",
+      }));
+      message.success("Расход добавлен");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось добавить расход");
+    }
+  };
 
   const toggleFunnel = (
     sourceKey: string,
@@ -220,6 +247,43 @@ export default function BusinessSettingsPage() {
             { title: "Статус", render: (_, row) => row.excluded ? <Tag color="red">Исключено: {row.reason}</Tag> : row.matched ? <Tag color="green">Сопоставлено</Tag> : <Tag color="orange">Не сопоставлено</Tag> },
           ]} />
         </Card>
+      ),
+    },
+    {
+      key: "expenses", label: "Расходы", children: (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Расходы Яндекс Директа загружаются автоматически"
+            description="Вручную добавляйте другие статьи и корректировки. В ROMI попадут только строки с включённым признаком «Учитывать в ROMI» и указанным рекламным каналом. Не дублируйте здесь расход, уже полученный из Директа."
+          />
+          <Card title="Добавить расход" subtitle="управленческие и рекламные расходы по юридическим лицам">
+            <div className="setrow" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div className="field"><label>Дата</label><DatePicker value={dayjs(expenseDraft.spent_at)} format="DD.MM.YYYY" onChange={(value) => value && setExpenseDraft((x) => ({ ...x, spent_at: value.format("YYYY-MM-DD") }))} /></div>
+              <div className="field"><label>Юрлицо</label><Select style={{ width: 150 }} options={entityOptions} value={expenseDraft.legal_entity_key || draft.legal_entities[0]?.key} onChange={(value) => setExpenseDraft((x) => ({ ...x, legal_entity_key: value }))} /></div>
+              <div className="field"><label>Статья расхода</label><Input style={{ width: 210 }} placeholder="Например, реклама в Авито" value={expenseDraft.article} onChange={(e) => setExpenseDraft((x) => ({ ...x, article: e.target.value }))} /></div>
+              <div className="field"><label>Сумма, ₽</label><InputNumber min={0.01} precision={2} style={{ width: 150 }} value={expenseDraft.amount} onChange={(value) => setExpenseDraft((x) => ({ ...x, amount: value ?? 0 }))} /></div>
+              <div className="field"><label>Учитывать в ROMI</label><Switch checked={expenseDraft.include_in_romi} onChange={(value) => setExpenseDraft((x) => ({ ...x, include_in_romi: value, channel: value ? x.channel : "", campaign: value ? x.campaign : "" }))} /></div>
+              <div className="field"><label>Рекламный канал</label><Input disabled={!expenseDraft.include_in_romi} style={{ width: 190 }} placeholder="Например, Авито" value={expenseDraft.channel} onChange={(e) => setExpenseDraft((x) => ({ ...x, channel: e.target.value }))} /></div>
+              <div className="field"><label>Кампания</label><Input disabled={!expenseDraft.include_in_romi} style={{ width: 180 }} placeholder="Необязательно" value={expenseDraft.campaign} onChange={(e) => setExpenseDraft((x) => ({ ...x, campaign: e.target.value }))} /></div>
+              <div className="field"><label>Комментарий</label><Input style={{ width: 220 }} placeholder="Необязательно" value={expenseDraft.comment} onChange={(e) => setExpenseDraft((x) => ({ ...x, comment: e.target.value }))} /></div>
+              <Button type="primary" loading={createExpense.isPending} disabled={!expenseDraft.article.trim() || expenseDraft.amount <= 0 || (expenseDraft.include_in_romi && !expenseDraft.channel.trim())} onClick={addExpense}>Добавить</Button>
+            </div>
+          </Card>
+          <Card title="Журнал расходов" subtitle="автоматические расходы Директа отображаются на дашборде, ручные — в этом журнале">
+            <Table rowKey="id" loading={expenses.isLoading} dataSource={expenses.data ?? []} pagination={{ pageSize: 25 }} columns={[
+              { title: "Дата", dataIndex: "spent_at", render: (value: string) => dayjs(value).format("DD.MM.YYYY") },
+              { title: "Юрлицо", dataIndex: "legal_entity_key", render: (value: string) => draft.legal_entities.find((x) => x.key === value)?.name ?? value },
+              { title: "Статья", dataIndex: "article" },
+              { title: "Сумма", dataIndex: "amount", render: (value: number) => `${value.toLocaleString("ru-RU")} ₽` },
+              { title: "ROMI", dataIndex: "include_in_romi", render: (value: boolean, row) => value ? <Tag color="purple">{row.channel}{row.campaign ? ` · ${row.campaign}` : ""}</Tag> : <Tag>Не учитывается</Tag> },
+              { title: "Комментарий", dataIndex: "comment" },
+              { title: "", render: (_, row) => <Popconfirm title="Удалить расход?" okText="Удалить" cancelText="Отмена" onConfirm={() => deleteExpense.mutateAsync(row.id).then(() => message.success("Расход удалён")).catch((e: Error) => message.error(e.message))}><Button danger size="small">Удалить</Button></Popconfirm> },
+            ]} />
+          </Card>
+        </>
       ),
     },
     {

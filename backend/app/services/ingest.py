@@ -236,7 +236,13 @@ def aggregate_channels(
         camp = row.get("campaign", "")
         cid = str(row.get("campaign_id") or "").strip()
         spend_net = _row_spend_net(row)
+        # Для Директа канал определяется по названию кампании. Ручной расход
+        # может явно задать канал (VK, Авито, наружная реклама и т. п.).
+        explicit_channel = str(row.get("channel") or "").strip()
         ch_name, color = channel_for_campaign(camp)
+        if explicit_channel:
+            ch_name = explicit_channel
+            color = "#E0803B"
         ch = channels.setdefault(ch_name, {
             "name": ch_name, "color": color, "spend": 0,
             "leads": 0, "deals": 0, "payments": 0, "revenue": 0, "margin": 0,

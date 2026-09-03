@@ -15,6 +15,7 @@ from app.models import (
     Deal,
     KpiCard,
     ManagerControl,
+    ManualExpense,
     OneCReceipt,
     Visit,
 )
@@ -68,6 +69,14 @@ async def _ad_totals(
     if legal_entity and legal_entity != "all":
         cost_where.append(AdCost.legal_entity_key == legal_entity)
         visit_where.append(Visit.legal_entity_key == legal_entity)
+    manual_where = [
+        ManualExpense.include_in_romi.is_(True),
+        ManualExpense.spent_at >= start,
+    ]
+    if end is not None:
+        manual_where.append(ManualExpense.spent_at < end)
+    if legal_entity and legal_entity != "all":
+        manual_where.append(ManualExpense.legal_entity_key == legal_entity)
     spend, clicks = (await session.execute(
         select(
             func.coalesce(func.sum(AdCost.spend), 0),
@@ -77,11 +86,24 @@ async def _ad_totals(
     visits = (await session.execute(
         select(func.coalesce(func.sum(Visit.visits), 0)).where(*visit_where)
     )).scalar() or 0
+    manual_spend = (await session.execute(
+        select(func.coalesce(func.sum(ManualExpense.amount), 0)).where(*manual_where)
+    )).scalar() or 0
 
-    has_costs = bool(await session.scalar(select(func.count()).select_from(AdCost)))
+    has_direct_costs = bool(await session.scalar(select(func.count()).select_from(AdCost)))
+    has_manual_costs = bool(await session.scalar(
+        select(func.count()).select_from(ManualExpense).where(
+            ManualExpense.include_in_romi.is_(True)
+        )
+    ))
+    has_costs = has_direct_costs or has_manual_costs
     has_visits = bool(await session.scalar(select(func.count()).select_from(Visit)))
     if has_costs and has_visits:
-        return {"spend": float(spend), "clicks": float(clicks), "visits": float(visits)}
+        return {
+            "spend": float(spend + manual_spend),
+            "clicks": float(clicks),
+            "visits": float(visits),
+        }
 
     # Резерв на данных прошлых версий: итоги каналов и базлайна за всё окно.
     legacy_spend = int((await session.execute(
@@ -91,10 +113,49 @@ async def _ad_totals(
         select(Baseline.key, Baseline.value).where(Baseline.key.in_(["clicks", "visits"]))
     )).all())
     return {
-        "spend": float(spend) if has_costs else float(legacy_spend),
-        "clicks": float(clicks) if has_costs else float(legacy.get("clicks", 0)),
+        "spend": float(spend + manual_spend) if has_costs else float(legacy_spend),
+        "clicks": float(clicks) if has_direct_costs else float(legacy.get("clicks", 0)),
         "visits": float(visits) if has_visits else float(legacy.get("visits", 0)),
     }
+
+
+async def expenses_by_article(
+    session: AsyncSession, period: str, legal_entity: str = "all"
+) -> list[dict]:
+    """Автоматические расходы Директа и ручные расходы по статьям."""
+    now = datetime.now(UTC)
+    start = _period_start(period, now)
+    end = _period_end(period, now)
+    direct_where = [AdCost.date.is_not(None), AdCost.date >= start]
+    manual_where = [ManualExpense.spent_at >= start]
+    if end is not None:
+        direct_where.append(AdCost.date < end)
+        manual_where.append(ManualExpense.spent_at < end)
+    if legal_entity and legal_entity != "all":
+        direct_where.append(AdCost.legal_entity_key == legal_entity)
+        manual_where.append(ManualExpense.legal_entity_key == legal_entity)
+
+    direct = (await session.execute(
+        select(func.coalesce(func.sum(AdCost.spend), 0)).where(*direct_where)
+    )).scalar() or 0
+    manual = (await session.execute(
+        select(ManualExpense.article, func.sum(ManualExpense.amount))
+        .where(*manual_where)
+        .group_by(ManualExpense.article)
+    )).all()
+    rows = [
+        {"article": article, "amount": float(amount or 0), "source": "manual"}
+        for article, amount in manual
+        if amount
+    ]
+    if direct:
+        rows.append({
+            "article": "Яндекс Директ (автоматически)",
+            "amount": float(direct),
+            "source": "automatic",
+        })
+    rows.sort(key=lambda item: (-item["amount"], item["article"]))
+    return rows
 
 
 def _num(value: object) -> float:

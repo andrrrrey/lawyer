@@ -15,13 +15,21 @@ router = APIRouter(prefix="/romi", tags=["romi"], dependencies=[Depends(require_
 
 
 @router.get("/by-channel")
-async def get_by_channel(session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
-    return await analytics.romi_channels_chart(session)
+async def get_by_channel(
+    period: str = "30",
+    legal_entity: str = "all",
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    return await analytics.romi_channels_chart(session, period, legal_entity)
 
 
 @router.get("/campaigns")
-async def get_campaigns(session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
-    return await analytics.campaigns_bubble(session)
+async def get_campaigns(
+    period: str = "30",
+    legal_entity: str = "all",
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    return await analytics.campaigns_bubble(session, period, legal_entity)
 
 
 @router.get("/budget-recs")

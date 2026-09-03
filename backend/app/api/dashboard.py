@@ -101,6 +101,15 @@ async def get_romi_by_channel(
     )
 
 
+@router.get("/expenses-by-article")
+async def get_expenses_by_article(
+    period: str = "30",
+    legal_entity: str = "all",
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    return await metrics.expenses_by_article(session, period, legal_entity)
+
+
 @router.get("/managers")
 async def get_managers(
     period: str = "30",

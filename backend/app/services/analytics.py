@@ -149,25 +149,54 @@ async def channels_table(
     return rows
 
 
-async def romi_channels_chart(session: AsyncSession) -> list[dict]:
-    """Данные для сравнения расхода и маржи по каналам (chart-romi2)."""
-    chs = await _channels(session)
+async def _chart_channels(
+    session: AsyncSession, period: str, legal_entity: str
+) -> list[dict]:
+    rebuilt = (
+        await ch_svc.for_period(session, period, legal_entity=legal_entity)
+        if settings.data_source == "real" else None
+    )
+    if rebuilt is not None:
+        return rebuilt
     return [
-        {"name": c.name, "short_name": f.short_channel(c.name),
-         "spend": c.spend, "margin": c.margin, "color": c.color}
+        {
+            "name": c.name, "color": c.color, "spend": c.spend,
+            "margin": c.margin, "campaigns": [
+                {
+                    "name": k.name, "spend": k.spend, "margin": k.margin,
+                    "revenue": k.revenue,
+                }
+                for k in c.campaigns
+            ],
+        }
+        for c in await _channels(session)
+    ]
+
+
+async def romi_channels_chart(
+    session: AsyncSession, period: str = "30", legal_entity: str = "all"
+) -> list[dict]:
+    """Данные для сравнения расхода и маржи по каналам (chart-romi2)."""
+    chs = await _chart_channels(session, period, legal_entity)
+    return [
+        {"name": c["name"], "short_name": f.short_channel(c["name"]),
+         "spend": c["spend"], "margin": c["margin"], "color": c["color"]}
         for c in chs
     ]
 
 
-async def campaigns_bubble(session: AsyncSession) -> list[dict]:
+async def campaigns_bubble(
+    session: AsyncSession, period: str = "30", legal_entity: str = "all"
+) -> list[dict]:
     """Пузырьковая диаграмма эффективности кампаний (chart-bubble)."""
-    chs = await _channels(session)
+    chs = await _chart_channels(session, period, legal_entity)
     out = []
     for c in chs:
-        for k in c.campaigns:
+        for k in c["campaigns"]:
             out.append({
-                "name": k.name, "spend": k.spend, "romi": f.romi_of(k.spend, k.margin),
-                "revenue": k.revenue, "color": c.color,
+                "name": k["name"], "spend": k["spend"],
+                "romi": f.romi_of(k["spend"], k["margin"]),
+                "revenue": k["revenue"], "color": c["color"],
             })
     return out
 

@@ -137,3 +137,50 @@ export function useOneCReceiptJournal() {
     queryFn: () => api.get("/admin/one-c/receipts"),
   });
 }
+
+export interface ManualExpense {
+  id: number;
+  spent_at: string;
+  legal_entity_key: string;
+  article: string;
+  amount: number;
+  include_in_romi: boolean;
+  channel: string;
+  campaign: string;
+  comment: string;
+}
+
+export type ManualExpensePayload = Omit<ManualExpense, "id">;
+
+export function useManualExpenses() {
+  return useQuery<ManualExpense[]>({
+    queryKey: ["admin", "expenses"],
+    queryFn: () => api.get("/admin/expenses"),
+  });
+}
+
+export function useCreateManualExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: ManualExpensePayload) => api.post<ManualExpense>("/admin/expenses", payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "expenses"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["romi"] });
+    },
+  });
+}
+
+export function useDeleteManualExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.delete<{ ok: boolean }>(`/admin/expenses/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "expenses"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["romi"] });
+    },
+  });
+}

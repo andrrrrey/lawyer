@@ -104,6 +104,29 @@ class AdCost(Base):
     impressions: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
+class ManualExpense(Base):
+    """Расход, введённый пользователем вручную.
+
+    Общие расходы хранятся для управленческого отчёта, но в рекламный расход и
+    ROMI попадают только строки с ``include_in_romi=True``. Это не позволяет
+    аренде, зарплатам и прочим операционным статьям исказить маркетинговую
+    окупаемость. Расходы Директа по-прежнему загружаются автоматически отдельно.
+    """
+
+    __tablename__ = "manual_expenses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    spent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
+    article: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    include_in_romi: Mapped[bool] = mapped_column(Boolean, default=False)
+    channel: Mapped[str] = mapped_column(String(128), default="")
+    campaign: Mapped[str] = mapped_column(String(128), default="")
+    comment: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Visit(Base):
     """Визиты Яндекс Метрики, сгруппированные по дню и источнику.
 

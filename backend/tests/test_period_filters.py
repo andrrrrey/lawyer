@@ -21,7 +21,7 @@ from sqlalchemy.pool import NullPool
 import app.models  # noqa: F401 — регистрирует таблицы
 from app.core.config import settings
 from app.core.db import Base
-from app.models import AdCost, Deal, Visit
+from app.models import AdCost, Deal, ManualExpense, Visit
 from app.services import analytics, metrics
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_period_test.db"
@@ -265,6 +265,31 @@ def test_custom_period_ad_totals_windowed() -> None:
         assert totals["spend"] == 5_000
         assert totals["clicks"] == 50   # 20 + 30
         assert totals["visits"] == 500  # 200 + 300
+
+    with_real_data(check)
+
+
+def test_manual_ad_expense_is_windowed_and_included_in_romi() -> None:
+    async def check(s: AsyncSession) -> None:
+        s.add(ManualExpense(
+            spent_at=NOW - timedelta(days=3), legal_entity_key="uo",
+            article="Реклама в Авито", amount=5000, include_in_romi=True,
+            channel="Авито", campaign="Юридические услуги", comment="",
+            created_at=NOW,
+        ))
+        await s.commit()
+
+        totals = await metrics._ad_totals(s, "30")
+        assert totals["spend"] == 11_000  # 6 000 Директ + 5 000 вручную
+
+        channels = await analytics.channels_table(s, period="30")
+        avito = next(row for row in channels if row["name"] == "Авито")
+        assert avito["spend"] == 5_000
+
+        articles = await metrics.expenses_by_article(s, "30")
+        assert {row["article"] for row in articles} == {
+            "Яндекс Директ (автоматически)", "Реклама в Авито",
+        }
 
     with_real_data(check)
 

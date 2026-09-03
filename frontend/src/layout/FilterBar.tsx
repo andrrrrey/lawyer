@@ -23,6 +23,7 @@ type Control = "period" | "legalEntity" | "channel" | "mgr" | "source";
 const PAGE_FILTERS: Record<string, Control[]> = {
   "/dashboard": ["period", "legalEntity", "mgr", "source"],
   "/analytics": ["period", "legalEntity", "channel"],
+  "/romi": ["period", "legalEntity"],
 };
 
 const ISO = "YYYY-MM-DD";

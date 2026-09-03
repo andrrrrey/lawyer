@@ -38,6 +38,7 @@ export interface FunnelStage { label: string; value: number; }
 export interface Source { name: string; short_name: string; color: string; leads: number; }
 export interface RevenueSeries { days: string[]; revenue: number[]; margin: number[]; }
 export interface RomiByChannel { name: string; short_name: string; romi: number; }
+export interface ExpenseByArticle { article: string; amount: number; source: "automatic" | "manual"; }
 
 export interface Manager {
   name: string; inwork: number; overdue: number; notask: number; fc: string;
@@ -115,6 +116,15 @@ export const useRevenueSeries = (f: DashFilters) =>
 
 export const useRomiByChannel = (f: DashFilters) =>
   useQuery<RomiByChannel[]>({ queryKey: ["dashboard", "romi-by-channel", ...key(f)], queryFn: () => api.get(`/dashboard/romi-by-channel${qs(f)}`) });
+
+export const useExpensesByArticle = (f: DashFilters) => {
+  const q = new URLSearchParams({ period: f.period });
+  if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
+  return useQuery<ExpenseByArticle[]>({
+    queryKey: ["dashboard", "expenses-by-article", f.period, f.legalEntity],
+    queryFn: () => api.get(`/dashboard/expenses-by-article?${q.toString()}`),
+  });
+};
 
 export const useManagers = (f: DashFilters) =>
   useQuery<Manager[]>({ queryKey: ["dashboard", "managers", ...key(f)], queryFn: () => api.get(`/dashboard/managers${qs(f)}`) });
