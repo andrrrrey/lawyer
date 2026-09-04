@@ -7,16 +7,134 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_session
+from app.api.deps import AuthUser, require_owner
+from app.core.config import settings as app_settings
 from app.core.db import get_session
-from app.models import ManualExpense, OneCReceipt
+from app.core.security import hash_password
+from app.models import AppUser, ManualExpense, OneCReceipt
 from app.services import admin, business_settings, content
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_session)])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_owner)])
+
+
+class AppUserPayload(BaseModel):
+    login: str = Field(min_length=3, max_length=128)
+    password: str = Field(default="", max_length=256)
+    role: str = "manager"
+    employee_key: str = Field(default="", max_length=128)
+    department_key: str = Field(default="", max_length=128)
+    enabled: bool = True
+
+    @field_validator("login")
+    @classmethod
+    def valid_login(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("Логин должен содержать не менее 3 символов")
+        return value
+
+    @field_validator("role")
+    @classmethod
+    def valid_role(cls, value: str) -> str:
+        if value not in {"owner", "head", "manager"}:
+            raise ValueError("Неизвестная роль")
+        return value
+
+
+def _user_row(row: AppUser) -> dict[str, Any]:
+    return {
+        "id": row.id, "login": row.login, "role": row.role,
+        "employee_key": row.employee_key, "department_key": row.department_key,
+        "enabled": row.enabled,
+    }
+
+
+async def _validate_user_scope(payload: AppUserPayload, session: AsyncSession) -> None:
+    if payload.login == app_settings.admin_login:
+        raise HTTPException(status_code=409, detail="Этот логин занят основной учётной записью")
+    config = await business_settings.get_settings(session)
+    if payload.role == "manager" and payload.employee_key not in {
+        str(item.get("key")) for item in config.get("employees", []) if item.get("enabled", True)
+    }:
+        raise HTTPException(status_code=422, detail="Для менеджера выберите активного сотрудника")
+    if payload.role == "head" and payload.department_key not in {
+        str(item.get("key")) for item in config.get("departments", []) if item.get("enabled", True)
+    }:
+        raise HTTPException(status_code=422, detail="Для руководителя выберите активный отдел")
+
+
+@router.get("/users")
+async def get_users(session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
+    rows = (await session.execute(select(AppUser).order_by(AppUser.login))).scalars().all()
+    return [_user_row(row) for row in rows]
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+async def create_user(
+    payload: AppUserPayload,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await _validate_user_scope(payload, session)
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=422, detail="Пароль должен содержать не менее 8 символов")
+    row = AppUser(
+        login=payload.login, password_hash=hash_password(payload.password),
+        role=payload.role, employee_key=payload.employee_key,
+        department_key=payload.department_key, enabled=payload.enabled,
+    )
+    session.add(row)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Такой логин уже существует") from exc
+    await session.refresh(row)
+    return _user_row(row)
+
+
+@router.put("/users/{user_id}")
+async def update_user(
+    user_id: int,
+    payload: AppUserPayload,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    await _validate_user_scope(payload, session)
+    row = await session.get(AppUser, user_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if payload.password and len(payload.password) < 8:
+        raise HTTPException(status_code=422, detail="Пароль должен содержать не менее 8 символов")
+    row.login = payload.login
+    row.role = payload.role
+    row.employee_key = payload.employee_key
+    row.department_key = payload.department_key
+    row.enabled = payload.enabled
+    if payload.password:
+        row.password_hash = hash_password(payload.password)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Такой логин уже существует") from exc
+    await session.refresh(row)
+    return _user_row(row)
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    result = await session.execute(delete(AppUser).where(AppUser.id == user_id))
+    if not result.rowcount:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    await session.commit()
+    return {"ok": True}
 
 
 class ManualExpensePayload(BaseModel):
@@ -205,11 +323,11 @@ async def get_regulation(session: AsyncSession = Depends(get_session)) -> dict[s
 @router.put("/regulation")
 async def put_regulation(
     data: dict = Body(...),
-    subject: str = Depends(require_session),
+    subject: AuthUser = Depends(require_owner),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        return await admin.update_regulation(session, data, user=subject)
+        return await admin.update_regulation(session, data, user=subject.login)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
@@ -224,10 +342,10 @@ async def get_history(session: AsyncSession = Depends(get_session)) -> list[dict
 @router.post("/history/{history_id}/rollback")
 async def rollback_history(
     history_id: int,
-    subject: str = Depends(require_session),
+    subject: AuthUser = Depends(require_owner),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        return await admin.rollback(session, history_id, user=subject)
+        return await admin.rollback(session, history_id, user=subject.login)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

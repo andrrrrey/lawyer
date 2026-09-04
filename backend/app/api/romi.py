@@ -7,11 +7,11 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_session
+from app.api.deps import require_financial_access
 from app.core.db import get_session
 from app.services import analytics, content
 
-router = APIRouter(prefix="/romi", tags=["romi"], dependencies=[Depends(require_session)])
+router = APIRouter(prefix="/romi", tags=["romi"], dependencies=[Depends(require_financial_access)])
 
 
 @router.get("/by-channel")

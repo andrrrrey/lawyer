@@ -36,12 +36,12 @@ def _period_end(period: str | None, now: datetime) -> datetime | None:
 
 
 def _by_deal_filters(
-    stmt, mgr: str = "all", source: str = "all", legal_entity: str = "all",
+    stmt, mgr: str | list[str] = "all", source: str = "all", legal_entity: str = "all",
     funnel: str = "all",
 ):
     """Единые фильтры дашборда на выборку сделок."""
     if mgr and mgr != "all":
-        stmt = stmt.where(Deal.mgr == mgr)
+        stmt = stmt.where(Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr)
     if source and source != "all":
         stmt = stmt.where(Deal.src == source)
     if legal_entity and legal_entity != "all":
@@ -868,6 +868,9 @@ async def managers(
     rows = (await session.execute(
         select(ManagerControl).order_by(ManagerControl.position)
     )).scalars().all()
+    if mgr != "all":
+        allowed = set(mgr if isinstance(mgr, list) else [mgr])
+        rows = [row for row in rows if row.name in allowed]
     return [
         {
             "name": m.name, "inwork": m.inwork, "overdue": m.overdue, "notask": m.notask,

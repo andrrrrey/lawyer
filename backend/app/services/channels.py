@@ -103,7 +103,7 @@ async def for_period(
     if end is not None:
         stmt = stmt.where(Deal.created_at < end)
     if mgr and mgr != "all":
-        stmt = stmt.where(Deal.mgr == mgr)
+        stmt = stmt.where(Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr)
     if source and source != "all":
         stmt = stmt.where(Deal.src == source)
     if legal_entity and legal_entity != "all":

@@ -8,8 +8,8 @@ const METRICS: { key: keyof PlanFactValues; label: string; money?: boolean }[] =
   { key: "meetings", label: "Встречи" },
 ];
 
-const number = (value: number, money = false) =>
-  `${value.toLocaleString("ru-RU")}${money ? " ₽" : ""}`;
+const number = (value: number | null, money = false) =>
+  value === null ? "Скрыто" : `${value.toLocaleString("ru-RU")}${money ? " ₽" : ""}`;
 
 function Metric({ row, metric, money }: {
   row: PlanFactRow; metric: keyof PlanFactValues; money?: boolean;
@@ -26,7 +26,8 @@ function Metric({ row, metric, money }: {
   );
 }
 
-export function PlanFactTable({ rows }: { rows: PlanFactRow[] }) {
+export function PlanFactTable({ rows, financial = true }: { rows: PlanFactRow[]; financial?: boolean }) {
+  const metrics = financial ? METRICS : METRICS.filter((item) => !["revenue", "payments"].includes(item.key));
   return (
     <div className="card">
       <div className="card-h">
@@ -34,12 +35,12 @@ export function PlanFactTable({ rows }: { rows: PlanFactRow[] }) {
       </div>
       <div className="tbl-wrap">
         <table>
-          <thead><tr><th>Уровень</th>{METRICS.map((item) => <th key={item.key}>{item.label}</th>)}<th>Итого</th></tr></thead>
+          <thead><tr><th>Уровень</th>{metrics.map((item) => <th key={item.key}>{item.label}</th>)}<th>Итого</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.key}>
                 <td><b>{row.scope_name}</b><div className="sub">{row.legal_entity_name}</div></td>
-                {METRICS.map((item) => <Metric key={item.key} row={row} metric={item.key} money={item.money} />)}
+                {metrics.map((item) => <Metric key={item.key} row={row} metric={item.key} money={item.money} />)}
                 <td><span className={`tag ${row.overall_completion !== null && row.overall_completion >= 100 ? "t-green" : "t-amber"}`}>{row.overall_completion === null ? "—" : `${row.overall_completion}%`}</span></td>
               </tr>
             ))}

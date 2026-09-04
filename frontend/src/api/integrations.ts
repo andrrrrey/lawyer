@@ -96,11 +96,12 @@ export function useIntegrations() {
 }
 
 // Лёгкий запрос текущего источника данных (для плашки режима в топбаре).
-export function useDataSource() {
+export function useDataSource(enabled = true) {
   return useQuery<{ data_source: DataSource }>({
     queryKey: ["integrations", "data-source"],
     queryFn: () => api.get("/integrations/data-source"),
     staleTime: 30_000,
+    enabled,
   });
 }
 

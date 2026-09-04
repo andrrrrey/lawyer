@@ -6,7 +6,12 @@ import { api, ApiError } from "./client";
 
 export interface User {
   login: string;
+  role: UserRole;
+  employee_key: string;
+  department_key: string;
 }
+
+export type UserRole = "owner" | "head" | "manager";
 
 export function useMe() {
   return useQuery<User | null>({

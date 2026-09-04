@@ -40,7 +40,7 @@ export interface RevenueSeries { days: string[]; revenue: number[]; margin: numb
 export interface RomiByChannel { name: string; short_name: string; romi: number; }
 export interface ExpenseByArticle { article: string; amount: number; source: "automatic" | "manual"; }
 export interface PlanFactValues {
-  revenue: number; payments: number; deals: number; calls: number; meetings: number;
+  revenue: number | null; payments: number | null; deals: number | null; calls: number | null; meetings: number | null;
 }
 export interface PlanFactRow {
   key: string;
@@ -137,15 +137,16 @@ export const useSources = (f: DashFilters) =>
 export const useRevenueSeries = (f: DashFilters) =>
   useQuery<RevenueSeries>({ queryKey: ["dashboard", "revenue", ...key(f)], queryFn: () => api.get(`/dashboard/revenue-series${qs(f)}`) });
 
-export const useRomiByChannel = (f: DashFilters) =>
-  useQuery<RomiByChannel[]>({ queryKey: ["dashboard", "romi-by-channel", ...key(f)], queryFn: () => api.get(`/dashboard/romi-by-channel${qs(f)}`) });
+export const useRomiByChannel = (f: DashFilters, enabled = true) =>
+  useQuery<RomiByChannel[]>({ queryKey: ["dashboard", "romi-by-channel", ...key(f)], queryFn: () => api.get(`/dashboard/romi-by-channel${qs(f)}`), enabled });
 
-export const useExpensesByArticle = (f: DashFilters) => {
+export const useExpensesByArticle = (f: DashFilters, enabled = true) => {
   const q = new URLSearchParams({ period: f.period });
   if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
   return useQuery<ExpenseByArticle[]>({
     queryKey: ["dashboard", "expenses-by-article", f.period, f.legalEntity],
     queryFn: () => api.get(`/dashboard/expenses-by-article?${q.toString()}`),
+    enabled,
   });
 };
 

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import require_session
+from app.api.deps import require_owner
 from app.core.config import settings
 from app.core.db import get_session
 from app.services import integrations_check as checker
@@ -25,7 +25,7 @@ from app.services import maintenance
 router = APIRouter(
     prefix="/integrations",
     tags=["integrations"],
-    dependencies=[Depends(require_session)],
+    dependencies=[Depends(require_owner)],
 )
 
 

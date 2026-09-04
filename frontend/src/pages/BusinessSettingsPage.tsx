@@ -18,6 +18,7 @@ import {
   useSaveBusinessSettings,
 } from "@/api/businessSettings";
 import AdminPage from "@/pages/AdminPage";
+import { UsersSettings } from "@/components/UsersSettings";
 
 const uid = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -126,6 +127,9 @@ export default function BusinessSettingsPage() {
   });
 
   const settingsTabs = [
+    {
+      key: "users", label: "Пользователи", children: <UsersSettings settings={draft} />,
+    },
     {
       key: "entities", label: "Юрлица и ДДС", children: (
         <>

@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 
 import { useDataSource } from "@/api/integrations";
 import { useMonitorStats } from "@/api/monitor";
+import { useMe } from "@/api/auth";
 import { NAV_ITEMS, NAV_SECTIONS } from "./navConfig";
 
 interface SidebarProps {
@@ -11,7 +12,8 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const mon = useMonitorStats();
-  const ds = useDataSource();
+  const me = useMe();
+  const ds = useDataSource(me.data?.role === "owner");
   const isReal = ds.data?.data_source === "real";
 
   // Реальный счётчик нарушений на пункте «Мониторинг» (вместо статичного).
@@ -36,7 +38,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {NAV_SECTIONS.map((section) => (
           <div key={section}>
             <div className="nav-label">{section}</div>
-            {NAV_ITEMS.filter((i) => i.section === section).map((item) => {
+            {NAV_ITEMS.filter((i) => i.section === section).filter((item) => {
+              if (me.data?.role === "owner") return true;
+              if (me.data?.role === "head") return !["settings", "integrations"].includes(item.key);
+              return ["dashboard", "monitor"].includes(item.key);
+            }).map((item) => {
               const { Icon } = item;
               const badge = badgeFor(item.key);
               return (
@@ -52,7 +58,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       </nav>
 
       <div className="side-foot">
-        <b>{isReal ? "Боевые интеграции" : "Демо-данные"}</b>
+        <b>{me.data?.role === "owner" ? (isReal ? "Боевые интеграции" : "Демо-данные") : "Рабочий кабинет"}</b>
         <br />
         Этап 1 · единая система контроля и аналитики
       </div>

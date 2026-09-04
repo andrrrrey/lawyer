@@ -24,8 +24,12 @@ def _with_amount_display(items: list[dict]) -> list[dict]:
     return items
 
 
-async def stats(session: AsyncSession) -> dict:
-    res = await vio.evaluate_current(session)
+async def stats(
+    session: AsyncSession,
+    mgr: str | list[str] = "all",
+    hide_financial: bool = False,
+) -> dict:
+    res = await vio.evaluate_current(session, mgr=mgr)
     regular = res["regular"]
     review = res["review"]
     over = [v for v in regular if v["severity"] == "over"]
@@ -34,7 +38,12 @@ async def stats(session: AsyncSession) -> dict:
 
     # «В норме» — доля сделок без нарушений (движок выдаёт не более одного
     # нарушения на сделку, поэтому len(regular) ≈ число проблемных сделок).
-    total = await session.scalar(select(func.count()).select_from(Deal)) or 0
+    total_stmt = select(func.count()).select_from(Deal)
+    if mgr != "all":
+        total_stmt = total_stmt.where(
+            Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr
+        )
+    total = await session.scalar(total_stmt) or 0
     if total:
         norm = f"{round(max(total - len(regular), 0) / total * 100)}%"
     else:
@@ -49,24 +58,40 @@ async def stats(session: AsyncSession) -> dict:
         {"n": str(len(review)), "label": "На проверке", "cls": "v", "key": "review"},
         {"n": norm, "label": "В норме", "cls": "g", "key": ""},
     ]
+    if hide_financial:
+        stat_rows = [row for row in stat_rows if row["key"] != "money"]
     return {"stats": stat_rows, "badge": len(regular)}
 
 
-async def violations(session: AsyncSession, ptype: str | None = None) -> list[dict]:
-    res = await vio.evaluate_current(session)
+async def violations(
+    session: AsyncSession, ptype: str | None = None, mgr: str | list[str] = "all",
+    hide_financial: bool = False,
+) -> list[dict]:
+    res = await vio.evaluate_current(session, mgr=mgr)
     regular = res["regular"]
     if ptype:
         regular = [v for v in regular if v["ptype"] == ptype]
-    return _with_amount_display(regular)
+    result = _with_amount_display(regular)
+    if hide_financial:
+        for row in result:
+            row.update(amount=0, amount_display="Скрыто")
+    return result
 
 
-async def review(session: AsyncSession) -> list[dict]:
-    res = await vio.evaluate_current(session)
-    return _with_amount_display(res["review"])
+async def review(
+    session: AsyncSession, mgr: str | list[str] = "all", hide_financial: bool = False,
+) -> list[dict]:
+    res = await vio.evaluate_current(session, mgr=mgr)
+    result = _with_amount_display(res["review"])
+    if hide_financial:
+        for row in result:
+            row.update(amount=0, amount_display="Скрыто")
+    return result
 
 
 async def create_task_for(
-    session: AsyncSession, ref: str | None = None, deal_key: str | None = None
+    session: AsyncSession, ref: str | None = None, deal_key: str | None = None,
+    mgr: str | list[str] = "all",
 ) -> dict:
     """Ставит задачу ответственному по сделке (по согласованной логике)."""
     # Доступы и режим источника данных сохраняются через UI в БД, а процессов
@@ -91,6 +116,8 @@ async def create_task_for(
         stmt = stmt.where(Deal.ref == ref)
     else:
         raise ValueError("Не указан идентификатор сделки")
+    if mgr != "all":
+        stmt = stmt.where(Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr)
     deal = (await session.execute(stmt)).scalars().first()
     if deal is None:
         raise ValueError("Сделка не найдена")

@@ -35,8 +35,9 @@ export function Topbar({ onMenu }: TopbarProps) {
   const { time, date } = useMoscowClock();
   const logout = useLogout();
   const me = useMe();
-  const ds = useDataSource();
+  const ds = useDataSource(me.data?.role === "owner");
   const isReal = ds.data?.data_source === "real";
+  const roleLabel = me.data?.role === "owner" ? "Собственник" : me.data?.role === "head" ? "Руководитель" : "Менеджер";
 
   const item = NAV_ITEMS.find((i) => location.pathname.startsWith(i.path)) ?? NAV_ITEMS[0];
 
@@ -52,17 +53,17 @@ export function Topbar({ onMenu }: TopbarProps) {
         <p>{item.subtitle}</p>
       </div>
       <div className="spacer" />
-      <div className={`demo-pill${isReal ? " live" : ""}`}>
+      {me.data?.role === "owner" ? <div className={`demo-pill${isReal ? " live" : ""}`}>
         <span className="dot" />
         {isReal ? "Боевые интеграции" : "Демо-данные"}
-      </div>
+      </div> : null}
       <div className="clock">
         <b>{time}</b>
         <br />
         <span>{date} · МСК</span>
       </div>
       <Button size="small" onClick={() => logout.mutate()} loading={logout.isPending}>
-        Выйти{me.data ? ` · ${me.data.login}` : ""}
+        Выйти{me.data ? ` · ${me.data.login} · ${roleLabel}` : ""}
       </Button>
     </header>
   );

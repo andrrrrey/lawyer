@@ -20,6 +20,7 @@ from app.models.marketing import (
     Visit,
 )
 from app.models.settings import (
+    AppUser,
     BusinessSettings,
     IntegrationSettings,
     RegulationConfig,
@@ -28,6 +29,7 @@ from app.models.settings import (
 
 __all__ = [
     "AdCost",
+    "AppUser",
     "AiInsight",
     "Baseline",
     "BudgetRec",

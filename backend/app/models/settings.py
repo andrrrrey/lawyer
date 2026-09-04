@@ -54,6 +54,20 @@ class BusinessSettings(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class AppUser(Base):
+    """Пользователь дашборда с ролью и привязкой к оргструктуре."""
+
+    __tablename__ = "app_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    login: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="manager")
+    employee_key: Mapped[str] = mapped_column(String(128), default="")
+    department_key: Mapped[str] = mapped_column(String(128), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class SettingsHistory(Base):
     """История изменений регламента (HISTORY): кто, когда, что менял."""
 

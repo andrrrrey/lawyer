@@ -17,6 +17,7 @@ import {
   donutOption, expensesBarOption, funnelOption, romiBarOption,
 } from "@/components/chartOptions";
 import { useFilters } from "@/state/filters";
+import { useMe } from "@/api/auth";
 
 function ChartCard({ title, sub, children }: { title: string; sub: string; children: ReactNode }) {
   return (
@@ -29,6 +30,8 @@ function ChartCard({ title, sub, children }: { title: string; sub: string; child
 
 export default function DashboardPage() {
   const f = useFilters();
+  const me = useMe();
+  const canViewFinancial = me.data?.role !== "manager";
   // Все витрины дашборда следуют одному набору фильтров панели.
   const q = {
     period: f.period,
@@ -41,8 +44,8 @@ export default function DashboardPage() {
   const attention = useAttention(q);
   const funnel = useFunnel(q);
   const sources = useSources(q);
-  const expenses = useExpensesByArticle(q);
-  const romi = useRomiByChannel(q);
+  const expenses = useExpensesByArticle(q, canViewFinancial);
+  const romi = useRomiByChannel(q, canViewFinancial);
   const managers = useManagers(q);
   const departments = useDepartments(q);
   const planFact = usePlanFact(new Date().toISOString().slice(0, 7), q);
@@ -64,7 +67,7 @@ export default function DashboardPage() {
         </ChartCard>
       </div>
 
-      <div className="grid two-b" style={{ marginTop: 16 }}>
+      {canViewFinancial ? <div className="grid two-b" style={{ marginTop: 16 }}>
         <ChartCard title="Расходы по статьям" sub="Директ автоматически + ручной журнал">
           {!expenses.data ? <Spin /> : expenses.data.length ? (
             <EChart option={expensesBarOption(expenses.data)} height={260} />
@@ -79,9 +82,9 @@ export default function DashboardPage() {
             <EmptyState title="ROMI пока не рассчитан" hint="Нужны рекламные расходы с каналом и связанные с кампаниями фактические поступления 1С." />
           )}
         </ChartCard>
-      </div>
+      </div> : null}
 
-      <div style={{ marginTop: 16 }}>
+      {me.data?.role !== "manager" ? <div style={{ marginTop: 16 }}>
         {managers.data && managers.data.length ? (
           <ManagersTable rows={managers.data} />
         ) : managers.data ? (
@@ -92,11 +95,11 @@ export default function DashboardPage() {
             />
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
       <div style={{ marginTop: 16 }}>
         {planFact.data?.length ? (
-          <PlanFactTable rows={planFact.data} />
+          <PlanFactTable rows={planFact.data} financial={canViewFinancial} />
         ) : planFact.data ? (
           <div className="card">
             <EmptyState
@@ -107,7 +110,7 @@ export default function DashboardPage() {
         ) : null}
       </div>
 
-      <div style={{ marginTop: 16 }}>
+      {me.data?.role !== "manager" ? <div style={{ marginTop: 16 }}>
         {departments.data?.length ? (
           <DepartmentsTable rows={departments.data} />
         ) : departments.data ? (
@@ -118,7 +121,7 @@ export default function DashboardPage() {
             />
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
       <div style={{ marginTop: 16 }}>
         {leads.data && leads.data.length ? (

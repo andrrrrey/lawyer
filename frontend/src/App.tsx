@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { RequireAuth } from "@/auth/RequireAuth";
+import { RequireRole } from "@/auth/RequireRole";
 import { AppLayout } from "@/layout/AppLayout";
 import AiPage from "@/pages/AiPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
@@ -19,12 +20,12 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/monitor" element={<MonitorPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/romi" element={<RomiPage />} />
-          <Route path="/ai" element={<AiPage />} />
-          <Route path="/admin" element={<Navigate to="/settings?tab=sla" replace />} />
-          <Route path="/settings" element={<BusinessSettingsPage />} />
-          <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/analytics" element={<RequireRole roles={["owner", "head"]}><AnalyticsPage /></RequireRole>} />
+          <Route path="/romi" element={<RequireRole roles={["owner", "head"]}><RomiPage /></RequireRole>} />
+          <Route path="/ai" element={<RequireRole roles={["owner", "head"]}><AiPage /></RequireRole>} />
+          <Route path="/admin" element={<RequireRole roles={["owner"]}><Navigate to="/settings?tab=sla" replace /></RequireRole>} />
+          <Route path="/settings" element={<RequireRole roles={["owner"]}><BusinessSettingsPage /></RequireRole>} />
+          <Route path="/integrations" element={<RequireRole roles={["owner"]}><IntegrationsPage /></RequireRole>} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
