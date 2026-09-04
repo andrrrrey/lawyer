@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -12,6 +13,8 @@ from app.models import BusinessSettings
 from app.seeds.business import BUSINESS_SETTINGS
 
 _ARTICLE_OPERATIONS = {"income", "refund", "exclude"}
+_PLAN_SCOPES = {"company", "department", "employee"}
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 async def get_settings(session: AsyncSession) -> dict[str, Any]:
@@ -97,13 +100,36 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
         if department_key and department_key not in department_keys:
             raise ValueError("Сотрудник ссылается на неизвестный отдел")
 
+    plan_keys: set[tuple[str, str, str, str]] = set()
     for plan in result["plans"]:
-        employee_key = str(plan.get("employee_key", ""))
-        if employee_key and employee_key not in employee_keys:
-            raise ValueError("План ссылается на неизвестного сотрудника")
         entity_key = str(plan.get("legal_entity_key", ""))
-        if entity_key and entity_key not in entity_keys:
+        if entity_key not in entity_keys:
             raise ValueError("План ссылается на неизвестное юридическое лицо")
+        scope_type = str(plan.get("scope_type") or "employee")
+        scope_key = str(plan.get("scope_key") or plan.get("employee_key") or "")
+        if scope_type not in _PLAN_SCOPES:
+            raise ValueError("Неизвестный уровень плана")
+        if scope_type == "employee" and scope_key not in employee_keys:
+            raise ValueError("План ссылается на неизвестного сотрудника")
+        if scope_type == "department" and scope_key not in department_keys:
+            raise ValueError("План ссылается на неизвестный отдел")
+        if not _MONTH_RE.fullmatch(str(plan.get("period") or "")):
+            raise ValueError("Период плана должен быть в формате ГГГГ-ММ")
+        plan["scope_type"] = scope_type
+        plan["scope_key"] = entity_key if scope_type == "company" else scope_key
+        plan.pop("employee_key", None)
+        identity = (entity_key, scope_type, plan["scope_key"], str(plan["period"]))
+        if identity in plan_keys:
+            raise ValueError("Для выбранного уровня уже задан план на этот месяц")
+        plan_keys.add(identity)
+        for metric in ("revenue", "payments", "deals", "calls", "meetings"):
+            try:
+                value = int(plan.get(metric) or 0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Показатель плана {metric} должен быть числом") from exc
+            if value < 0:
+                raise ValueError("Показатели плана не могут быть отрицательными")
+            plan[metric] = value
 
     result["schema_version"] = 1
     return result

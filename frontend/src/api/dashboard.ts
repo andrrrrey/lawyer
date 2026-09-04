@@ -39,6 +39,20 @@ export interface Source { name: string; short_name: string; color: string; leads
 export interface RevenueSeries { days: string[]; revenue: number[]; margin: number[]; }
 export interface RomiByChannel { name: string; short_name: string; romi: number; }
 export interface ExpenseByArticle { article: string; amount: number; source: "automatic" | "manual"; }
+export interface PlanFactValues {
+  revenue: number; payments: number; deals: number; calls: number; meetings: number;
+}
+export interface PlanFactRow {
+  key: string;
+  scope_type: "company" | "department" | "employee";
+  scope_name: string;
+  legal_entity_name: string;
+  month: string;
+  plan: PlanFactValues;
+  fact: PlanFactValues;
+  completion: Record<keyof PlanFactValues, number | null>;
+  overall_completion: number | null;
+}
 
 export interface Manager {
   name: string; inwork: number; overdue: number; notask: number; fc: string;
@@ -132,6 +146,16 @@ export const useExpensesByArticle = (f: DashFilters) => {
 
 export const useManagers = (f: DashFilters) =>
   useQuery<Manager[]>({ queryKey: ["dashboard", "managers", ...key(f)], queryFn: () => api.get(`/dashboard/managers${qs(f)}`) });
+
+export const usePlanFact = (month: string, f: DashFilters) => {
+  const q = new URLSearchParams({ month });
+  if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
+  if (f.funnel && f.funnel !== "all") q.set("funnel", f.funnel);
+  return useQuery<PlanFactRow[]>({
+    queryKey: ["dashboard", "plan-fact", month, f.legalEntity, f.funnel],
+    queryFn: () => api.get(`/dashboard/plan-fact?${q.toString()}`),
+  });
+};
 
 export const useLeads = (
   mgr: string,

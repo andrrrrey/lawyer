@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_session
 from app.core.db import get_session
-from app.services import metrics
+from app.services import metrics, plan_fact
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(require_session)])
 
@@ -156,3 +157,19 @@ async def get_leads(
         legal_entity=legal_entity,
         funnel=funnel,
     )
+
+
+@router.get("/plan-fact")
+async def get_plan_fact(
+    month: str | None = None,
+    legal_entity: str = "all",
+    funnel: str = "all",
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    selected_month = month or datetime.now(UTC).strftime("%Y-%m")
+    try:
+        return await plan_fact.rows(
+            session, selected_month, legal_entity=legal_entity, funnel=funnel
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

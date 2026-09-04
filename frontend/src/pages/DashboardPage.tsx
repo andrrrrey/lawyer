@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import {
   useAttention, useExpensesByArticle, useFunnel, useKpis, useLeads, useManagers,
-  useRomiByChannel, useSources,
+  usePlanFact, useRomiByChannel, useSources,
 } from "@/api/dashboard";
 import { AttentionBlock } from "@/components/AttentionBlock";
 import { EChart } from "@/components/EChart";
@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { KpiRow } from "@/components/KpiRow";
 import { LeadsTable } from "@/components/LeadsTable";
 import { ManagersTable } from "@/components/ManagersTable";
+import { PlanFactTable } from "@/components/PlanFactTable";
 import {
   donutOption, expensesBarOption, funnelOption, romiBarOption,
 } from "@/components/chartOptions";
@@ -42,6 +43,7 @@ export default function DashboardPage() {
   const expenses = useExpensesByArticle(q);
   const romi = useRomiByChannel(q);
   const managers = useManagers(q);
+  const planFact = usePlanFact(new Date().toISOString().slice(0, 7), q);
   const leads = useLeads(
     f.mgr, f.source, f.leadFilter, f.period, f.legalEntity, f.funnel,
   );
@@ -85,6 +87,19 @@ export default function DashboardPage() {
             <EmptyState
               title="Нет данных по менеджерам"
               hint="Агрегаты считаются автоматически по сделкам Битрикс24 с назначенным ответственным. Подключите Битрикс24 и выполните пересчёт — если данных нет, значит у сделок за период не заполнен ответственный."
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        {planFact.data?.length ? (
+          <PlanFactTable rows={planFact.data} />
+        ) : planFact.data ? (
+          <div className="card">
+            <EmptyState
+              title="Планы на текущий месяц не заданы"
+              hint="Добавьте план компании, отдела или сотрудника в разделе «Настройки → Структура и планы»."
             />
           </div>
         ) : null}

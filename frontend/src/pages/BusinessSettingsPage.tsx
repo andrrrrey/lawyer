@@ -8,6 +8,7 @@ import {
   type BitrixFunnelOption,
   type DdsArticle,
   type Funnel,
+  type Plan,
   useBitrixFunnels,
   useBusinessSettings,
   useCreateManualExpense,
@@ -61,6 +62,11 @@ export default function BusinessSettingsPage() {
   const slaOptions = draft.sla_profiles.map((x) => ({ value: x.key, label: x.name }));
   const departmentOptions = draft.departments.map((x) => ({ value: x.key, label: x.name }));
   const employeeOptions = draft.employees.map((x) => ({ value: x.key, label: x.name }));
+  const planTargetOptions = (scope: Plan["scope_type"]) => {
+    if (scope === "department") return departmentOptions;
+    if (scope === "employee") return employeeOptions;
+    return [];
+  };
 
   const addExpense = async () => {
     const payload = {
@@ -297,9 +303,67 @@ export default function BusinessSettingsPage() {
             {draft.employees.map((row, index) => <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}><Input style={inputStyle} placeholder="ФИО" value={row.name} onChange={(e) => mutate((x) => { x.employees[index].name = e.target.value; })} /><Select style={{ width: 190 }} placeholder="Bitrix24" options={draft.crm_sources.map((x) => ({ value: x.key, label: x.name }))} value={row.crm_source || undefined} onChange={(v) => mutate((x) => { x.employees[index].crm_source = v; })} /><Input style={{ width: 140 }} placeholder="ID Bitrix24" value={row.bitrix_user_id} onChange={(e) => mutate((x) => { x.employees[index].bitrix_user_id = e.target.value; })} /><Select style={{ width: 120 }} allowClear placeholder="Юрлицо" options={entityOptions} value={row.legal_entity_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].legal_entity_key = v ?? ""; })} /><Select style={{ width: 180 }} allowClear placeholder="Отдел" options={departmentOptions} value={row.department_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].department_key = v ?? ""; })} /><Switch checked={row.enabled} onChange={(v) => mutate((x) => { x.employees[index].enabled = v; })} /><Button danger onClick={() => mutate((x) => x.employees.splice(index, 1))}>Удалить</Button></div>)}
             <Button onClick={() => mutate((x) => x.employees.push({ key: uid("employee"), name: "Новый сотрудник", crm_source: x.crm_sources[0]?.key ?? "", bitrix_user_id: "", legal_entity_key: "", department_key: "", enabled: true }))}>Добавить сотрудника</Button>
           </Card>
-          <Card title="Планы сотрудников" subtitle="период в формате ГГГГ-ММ">
-            {draft.plans.map((row, index) => <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}><Select style={{ width: 190 }} placeholder="Сотрудник" options={employeeOptions} value={row.employee_key || undefined} onChange={(v) => mutate((x) => { x.plans[index].employee_key = v; })} /><Select style={{ width: 120 }} placeholder="Юрлицо" options={entityOptions} value={row.legal_entity_key || undefined} onChange={(v) => mutate((x) => { x.plans[index].legal_entity_key = v; })} /><Input style={{ width: 120 }} placeholder="2026-09" value={row.period} onChange={(e) => mutate((x) => { x.plans[index].period = e.target.value; })} /><InputNumber addonBefore="Выручка" min={0} value={row.revenue} onChange={(v) => mutate((x) => { x.plans[index].revenue = v ?? 0; })} /><InputNumber addonBefore="Оплаты" min={0} value={row.payments} onChange={(v) => mutate((x) => { x.plans[index].payments = v ?? 0; })} /><InputNumber addonBefore="Сделки" min={0} value={row.deals} onChange={(v) => mutate((x) => { x.plans[index].deals = v ?? 0; })} /><Button danger onClick={() => mutate((x) => x.plans.splice(index, 1))}>Удалить</Button></div>)}
-            <Button disabled={!draft.employees.length} onClick={() => mutate((x) => x.plans.push({ key: uid("plan"), employee_key: x.employees[0]?.key ?? "", legal_entity_key: x.legal_entities[0]?.key ?? "", period: new Date().toISOString().slice(0, 7), revenue: 0, payments: 0, deals: 0 }))}>Добавить план</Button>
+          <Card title="Планы" subtitle="на компанию, отдел или сотрудника; факт рассчитывается автоматически">
+            {draft.plans.map((row, index) => (
+              <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}>
+                <Select
+                  style={{ width: 145 }}
+                  value={row.scope_type}
+                  options={[
+                    { value: "company", label: "Компания" },
+                    { value: "department", label: "Отдел" },
+                    { value: "employee", label: "Сотрудник" },
+                  ]}
+                  onChange={(scope: Plan["scope_type"]) => mutate((x) => {
+                    x.plans[index].scope_type = scope;
+                    x.plans[index].scope_key = scope === "company"
+                      ? x.plans[index].legal_entity_key
+                      : planTargetOptions(scope)[0]?.value ?? "";
+                  })}
+                />
+                {row.scope_type !== "company" ? (
+                  <Select
+                    style={{ width: 190 }}
+                    placeholder={row.scope_type === "department" ? "Отдел" : "Сотрудник"}
+                    options={planTargetOptions(row.scope_type)}
+                    value={row.scope_key || undefined}
+                    onChange={(value) => mutate((x) => { x.plans[index].scope_key = value; })}
+                  />
+                ) : null}
+                <Select
+                  style={{ width: 120 }}
+                  placeholder="Юрлицо"
+                  options={entityOptions}
+                  value={row.legal_entity_key || undefined}
+                  onChange={(value) => mutate((x) => {
+                    x.plans[index].legal_entity_key = value;
+                    if (x.plans[index].scope_type === "company") x.plans[index].scope_key = value;
+                  })}
+                />
+                <DatePicker
+                  picker="month"
+                  format="MM.YYYY"
+                  value={dayjs(`${row.period}-01`)}
+                  onChange={(value) => {
+                    if (value) mutate((x) => { x.plans[index].period = value.format("YYYY-MM"); });
+                  }}
+                />
+                <InputNumber addonBefore="Выручка" min={0} value={row.revenue} onChange={(v) => mutate((x) => { x.plans[index].revenue = v ?? 0; })} />
+                <InputNumber addonBefore="Оплаты" min={0} value={row.payments} onChange={(v) => mutate((x) => { x.plans[index].payments = v ?? 0; })} />
+                <InputNumber addonBefore="Продажи" min={0} value={row.deals} onChange={(v) => mutate((x) => { x.plans[index].deals = v ?? 0; })} />
+                <InputNumber addonBefore="Звонки" min={0} value={row.calls} onChange={(v) => mutate((x) => { x.plans[index].calls = v ?? 0; })} />
+                <InputNumber addonBefore="Встречи" min={0} value={row.meetings} onChange={(v) => mutate((x) => { x.plans[index].meetings = v ?? 0; })} />
+                <Button danger onClick={() => mutate((x) => x.plans.splice(index, 1))}>Удалить</Button>
+              </div>
+            ))}
+            <Button disabled={!draft.legal_entities.length} onClick={() => mutate((x) => {
+              const entity = x.legal_entities[0]?.key ?? "";
+              x.plans.push({
+                key: uid("plan"), scope_type: "company", scope_key: entity,
+                legal_entity_key: entity, period: new Date().toISOString().slice(0, 7),
+                revenue: 0, payments: 0, deals: 0, calls: 0, meetings: 0,
+              });
+            })}>Добавить план</Button>
           </Card>
         </>
       ),

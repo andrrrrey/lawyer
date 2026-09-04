@@ -41,12 +41,15 @@ export interface Employee {
 }
 export interface Plan {
   key: string;
-  employee_key: string;
+  scope_type: "company" | "department" | "employee";
+  scope_key: string;
   legal_entity_key: string;
   period: string;
   revenue: number;
   payments: number;
   deals: number;
+  calls: number;
+  meetings: number;
 }
 export interface SlaRule {
   source_number: number;
