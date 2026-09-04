@@ -59,6 +59,11 @@ export interface Manager {
   invoices: number; payments: number; paysum: number; paysum_display: string;
   zone_label: string; zone_class: string;
 }
+export interface DepartmentAnalytics {
+  key: string; name: string; employees: number; leads: number; inwork: number;
+  sales: number; conversion: number; calls: number; meetings: number;
+  payments: number; revenue: number; revenue_display: string;
+}
 
 export interface Lead {
   name: string; src: string; mgr: string; status_label: string; status_class: string;
@@ -146,6 +151,12 @@ export const useExpensesByArticle = (f: DashFilters) => {
 
 export const useManagers = (f: DashFilters) =>
   useQuery<Manager[]>({ queryKey: ["dashboard", "managers", ...key(f)], queryFn: () => api.get(`/dashboard/managers${qs(f)}`) });
+
+export const useDepartments = (f: DashFilters) =>
+  useQuery<DepartmentAnalytics[]>({
+    queryKey: ["dashboard", "departments", ...key(f)],
+    queryFn: () => api.get(`/dashboard/departments${qs(f)}`),
+  });
 
 export const usePlanFact = (month: string, f: DashFilters) => {
   const q = new URLSearchParams({ month });

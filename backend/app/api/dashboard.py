@@ -159,6 +159,21 @@ async def get_leads(
     )
 
 
+@router.get("/departments")
+async def get_departments(
+    period: str = "30",
+    mgr: str = "all",
+    source: str = "all",
+    legal_entity: str = "all",
+    funnel: str = "all",
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    return await metrics.departments(
+        session, period, mgr=mgr, source=source, legal_entity=legal_entity,
+        funnel=funnel,
+    )
+
+
 @router.get("/plan-fact")
 async def get_plan_fact(
     month: str | None = None,

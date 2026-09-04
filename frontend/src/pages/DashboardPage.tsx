@@ -2,12 +2,13 @@ import { Spin } from "antd";
 import type { ReactNode } from "react";
 
 import {
-  useAttention, useExpensesByArticle, useFunnel, useKpis, useLeads, useManagers,
-  usePlanFact, useRomiByChannel, useSources,
+  useAttention, useDepartments, useExpensesByArticle, useFunnel, useKpis, useLeads,
+  useManagers, usePlanFact, useRomiByChannel, useSources,
 } from "@/api/dashboard";
 import { AttentionBlock } from "@/components/AttentionBlock";
 import { EChart } from "@/components/EChart";
 import { EmptyState } from "@/components/EmptyState";
+import { DepartmentsTable } from "@/components/DepartmentsTable";
 import { KpiRow } from "@/components/KpiRow";
 import { LeadsTable } from "@/components/LeadsTable";
 import { ManagersTable } from "@/components/ManagersTable";
@@ -43,6 +44,7 @@ export default function DashboardPage() {
   const expenses = useExpensesByArticle(q);
   const romi = useRomiByChannel(q);
   const managers = useManagers(q);
+  const departments = useDepartments(q);
   const planFact = usePlanFact(new Date().toISOString().slice(0, 7), q);
   const leads = useLeads(
     f.mgr, f.source, f.leadFilter, f.period, f.legalEntity, f.funnel,
@@ -100,6 +102,19 @@ export default function DashboardPage() {
             <EmptyState
               title="Планы на текущий месяц не заданы"
               hint="Добавьте план компании, отдела или сотрудника в разделе «Настройки → Структура и планы»."
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        {departments.data?.length ? (
+          <DepartmentsTable rows={departments.data} />
+        ) : departments.data ? (
+          <div className="card">
+            <EmptyState
+              title="Отделы ещё не настроены"
+              hint="Создайте отделы и распределите сотрудников в разделе «Настройки → Структура и планы»."
             />
           </div>
         ) : null}

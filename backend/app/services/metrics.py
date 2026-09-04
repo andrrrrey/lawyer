@@ -12,6 +12,7 @@ from app.models import (
     AdCost,
     Baseline,
     Channel,
+    CrmActivity,
     Deal,
     KpiCard,
     ManagerControl,
@@ -876,6 +877,107 @@ async def managers(
         }
         for m in rows
     ]
+
+
+async def departments(
+    session: AsyncSession,
+    period: str = per.DEFAULT_PERIOD,
+    mgr: str = "all",
+    source: str = "all",
+    legal_entity: str = "all",
+    funnel: str = "all",
+) -> list[dict]:
+    """Агрегаты отделов по привязкам сотрудников из бизнес-настроек."""
+    from app.services import business_settings
+
+    config = await business_settings.get_settings(session)
+    employees = [item for item in config.get("employees", []) if item.get("enabled", True)]
+    identity_department = {
+        (str(item.get("crm_source") or ""), str(item.get("bitrix_user_id") or "")):
+            str(item.get("department_key") or "")
+        for item in employees
+        if item.get("crm_source") and item.get("bitrix_user_id") and item.get("department_key")
+    }
+    allowed_departments = {
+        str(item.get("department_key") or "")
+        for item in employees
+        if legal_entity == "all" or item.get("legal_entity_key") == legal_entity
+    }
+    aggregates = {
+        str(item.get("key")): {
+            "key": str(item.get("key")),
+            "name": str(item.get("name") or "Отдел"),
+            "employees": sum(
+                1 for employee in employees
+                if str(employee.get("department_key") or "") == str(item.get("key"))
+                and (legal_entity == "all" or employee.get("legal_entity_key") == legal_entity)
+            ),
+            "leads": 0, "inwork": 0, "sales": 0, "calls": 0, "meetings": 0,
+            "payments": 0, "revenue": 0.0,
+        }
+        for item in config.get("departments", [])
+        if item.get("enabled", True) and str(item.get("key")) in allowed_departments
+    }
+    if not aggregates:
+        return []
+
+    deals = await period_deals(session, period, mgr, source, legal_entity, funnel)
+    deals_by_id = {deal.id: deal for deal in deals}
+    for deal in deals:
+        department_key = identity_department.get((deal.crm_source, str(deal.mgr_id or "")))
+        item = aggregates.get(department_key or "")
+        if item is None:
+            continue
+        item["leads"] += 1
+        item["inwork"] += int(deal.status_class == "st-mid")
+        item["sales"] += int(deal.status_class == "st-ok")
+
+    now = datetime.now(UTC)
+    start, end = _period_start(period, now), _period_end(period, now)
+    if deals_by_id:
+        activity_stmt = (
+            select(CrmActivity, Deal.crm_source)
+            .join(Deal, CrmActivity.deal_id == Deal.id)
+            .where(
+                CrmActivity.deal_id.in_(deals_by_id),
+                CrmActivity.occurred_at.is_not(None),
+                CrmActivity.occurred_at >= start,
+            )
+        )
+        if end is not None:
+            activity_stmt = activity_stmt.where(CrmActivity.occurred_at < end)
+        for activity, crm_source in (await session.execute(activity_stmt)).all():
+            department_key = identity_department.get(
+                (crm_source, str(activity.responsible_id or ""))
+            )
+            item = aggregates.get(department_key or "")
+            if item is not None and activity.kind in ("call", "meeting"):
+                item[f"{activity.kind}s"] += 1
+
+        receipt_stmt = select(OneCReceipt).where(
+            OneCReceipt.excluded.is_(False),
+            OneCReceipt.matched_deal_id.in_(deals_by_id),
+            OneCReceipt.registrar_date.is_not(None),
+            OneCReceipt.registrar_date >= start,
+        )
+        if end is not None:
+            receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
+        for receipt in (await session.execute(receipt_stmt)).scalars().all():
+            deal = deals_by_id.get(receipt.matched_deal_id or 0)
+            if deal is None:
+                continue
+            department_key = identity_department.get((deal.crm_source, str(deal.mgr_id or "")))
+            item = aggregates.get(department_key or "")
+            if item is not None:
+                item["payments"] += 1
+                item["revenue"] += float(receipt.amount or 0)
+
+    for item in aggregates.values():
+        item["conversion"] = round(
+            item["sales"] / item["leads"] * 100, 1
+        ) if item["leads"] else 0.0
+        item["revenue_display"] = f.money(item["revenue"])
+    return sorted(aggregates.values(), key=lambda item: (-item["revenue"], item["name"]))
 
 
 async def leads(

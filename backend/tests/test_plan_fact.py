@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.core.db import Base
 from app.models import CrmActivity, Deal, OneCReceipt
 from app.seeds.business import BUSINESS_SETTINGS
-from app.services import business_settings, plan_fact
+from app.services import business_settings, metrics, plan_fact
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_plan_fact_test.db"
 
@@ -65,15 +65,15 @@ def test_plan_fact_for_all_scope_levels() -> None:
                 session.add_all([
                     CrmActivity(
                         deal_id=deal.id, external_id="c1", kind="call",
-                        occurred_at=datetime(2026, 9, 3, tzinfo=UTC),
+                        responsible_id="12", occurred_at=datetime(2026, 9, 3, tzinfo=UTC),
                     ),
                     CrmActivity(
                         deal_id=deal.id, external_id="c2", kind="call",
-                        occurred_at=datetime(2026, 9, 4, tzinfo=UTC),
+                        responsible_id="12", occurred_at=datetime(2026, 9, 4, tzinfo=UTC),
                     ),
                     CrmActivity(
                         deal_id=deal.id, external_id="m1", kind="meeting",
-                        occurred_at=datetime(2026, 9, 5, tzinfo=UTC),
+                        responsible_id="12", occurred_at=datetime(2026, 9, 5, tzinfo=UTC),
                     ),
                     OneCReceipt(
                         external_key="r1", legal_entity_key="uo", amount=Decimal("100000"),
@@ -93,6 +93,14 @@ def test_plan_fact_for_all_scope_levels() -> None:
                         "calls": 2, "meetings": 1,
                     }
                     assert row["overall_completion"] == 50.0
+
+                departments = await metrics.departments(session, "30")
+                assert departments == [{
+                    "key": "sales", "name": "Продажи", "employees": 1,
+                    "leads": 1, "inwork": 0, "sales": 1, "calls": 2,
+                    "meetings": 1, "payments": 1, "revenue": 100_000.0,
+                    "conversion": 100.0, "revenue_display": "100 000 ₽",
+                }]
         finally:
             settings.onec_endpoint = previous_endpoint
             await engine.dispose()
