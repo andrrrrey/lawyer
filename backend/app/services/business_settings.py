@@ -142,6 +142,17 @@ def legal_entity_for_funnel(data: dict[str, Any], crm_source: str, funnel_id: st
     return ""
 
 
+def funnel_name(data: dict[str, Any], crm_source: str, funnel_id: str) -> str:
+    """Пользовательское название выбранной в настройках воронки."""
+    for funnel in data.get("funnels", []):
+        if (
+            str(funnel.get("crm_source")) == crm_source
+            and str(funnel.get("external_id")) == str(funnel_id)
+        ):
+            return str(funnel.get("name") or "")
+    return ""
+
+
 def sla_profile_for_funnel(
     data: dict[str, Any], crm_source: str, funnel_id: str
 ) -> dict[str, Any] | None:

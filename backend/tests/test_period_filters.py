@@ -30,7 +30,8 @@ NOW = datetime.now(UTC)
 
 
 def _deal(pos: int, *, days_ago: int, mgr: str, src: str, amount: int,
-          campaign: str = "10", won: bool = True) -> Deal:
+          campaign: str = "10", won: bool = True, crm_source: str = "box",
+          funnel_id: str = "10") -> Deal:
     return Deal(
         position=pos, on_dashboard=True, ref=f"Сделка #{pos}", external_id=str(pos),
         name=f"Сделка {pos}", src=src, mgr=mgr, campaign=campaign,
@@ -38,6 +39,7 @@ def _deal(pos: int, *, days_ago: int, mgr: str, src: str, amount: int,
         status_class="st-ok" if won else "st-mid",
         stage="Оплачено" if won else "В работе", amount=amount,
         created_at=NOW - timedelta(days=days_ago),
+        crm_source=crm_source, funnel_id=funnel_id,
     )
 
 
@@ -52,9 +54,12 @@ async def _seed(session: AsyncSession) -> None:
     # По одной сделке в каждом окне периода: сегодня / 7 дней / 30 дней / квартал.
     session.add_all([
         _deal(1, days_ago=0, mgr="Иванов", src="Сайт", amount=100_000),
-        _deal(2, days_ago=3, mgr="Петров", src="Звонок", amount=200_000),
-        _deal(3, days_ago=20, mgr="Иванов", src="Сайт", amount=300_000),
-        _deal(4, days_ago=60, mgr="Петров", src="Сайт", amount=400_000),
+        _deal(2, days_ago=3, mgr="Петров", src="Звонок", amount=200_000,
+              funnel_id="20"),
+        _deal(3, days_ago=20, mgr="Иванов", src="Сайт", amount=300_000,
+              crm_source="cloud"),
+        _deal(4, days_ago=60, mgr="Петров", src="Сайт", amount=400_000,
+              crm_source="cloud", funnel_id="20"),
     ])
     # Расход и клики — по дню; визиты — агрегат Метрики по дню.
     session.add_all([
@@ -167,6 +172,18 @@ def test_sources_donut_follows_filters() -> None:
 
         only_ivanov = {r["name"]: r["leads"] for r in await metrics.sources(s, "30", mgr="Иванов")}
         assert only_ivanov == {"Сайт": 2}
+
+    with_real_data(check)
+
+
+def test_global_funnel_filter_uses_portal_and_funnel_id() -> None:
+    """Одинаковый ID в двух Bitrix не смешивает разные воронки."""
+    async def check(s: AsyncSession) -> None:
+        box = await metrics.period_deals(s, "30", funnel="box:10")
+        cloud = await metrics.period_deals(s, "30", funnel="cloud:10")
+
+        assert [deal.position for deal in box] == [1]
+        assert [deal.position for deal in cloud] == [3]
 
     with_real_data(check)
 

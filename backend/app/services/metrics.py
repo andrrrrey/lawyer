@@ -34,15 +34,23 @@ def _period_end(period: str | None, now: datetime) -> datetime | None:
 
 
 def _by_deal_filters(
-    stmt, mgr: str = "all", source: str = "all", legal_entity: str = "all"
+    stmt, mgr: str = "all", source: str = "all", legal_entity: str = "all",
+    funnel: str = "all",
 ):
-    """Фильтры дашборда «менеджер» и «источник» на выборку сделок."""
+    """Единые фильтры дашборда на выборку сделок."""
     if mgr and mgr != "all":
         stmt = stmt.where(Deal.mgr == mgr)
     if source and source != "all":
         stmt = stmt.where(Deal.src == source)
     if legal_entity and legal_entity != "all":
         stmt = stmt.where(Deal.legal_entity_key == legal_entity)
+    if funnel and funnel != "all":
+        crm_source, separator, funnel_id = funnel.partition(":")
+        if separator and crm_source and funnel_id:
+            stmt = stmt.where(
+                Deal.crm_source == crm_source,
+                Deal.funnel_id == funnel_id,
+            )
     return stmt
 
 
@@ -174,6 +182,7 @@ async def period_deals(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[Deal]:
     """Сделки дашборда за период с учётом фильтров «менеджер» и «источник»."""
     now = datetime.now(UTC)
@@ -187,7 +196,7 @@ async def period_deals(
     if end is not None:
         stmt = stmt.where(Deal.created_at < end)
     return list((await session.execute(
-        _by_deal_filters(stmt, mgr, source, legal_entity)
+        _by_deal_filters(stmt, mgr, source, legal_entity, funnel)
     )).scalars().all())
 
 
@@ -197,6 +206,7 @@ async def _period_baseline(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> dict[str, float]:
     """Реальные KPI за период — по сделкам с created_at в интервале (боевой режим).
 
@@ -204,7 +214,7 @@ async def _period_baseline(
     Маржа считается только если сопоставлено поле себестоимости (иначе 0).
     Фильтры «менеджер»/«источник» сужают выборку сделок; рекламные показатели
     (расход/клики/визиты) от них не зависят — см. _ad_totals."""
-    rows = await period_deals(session, period, mgr, source, legal_entity)
+    rows = await period_deals(session, period, mgr, source, legal_entity, funnel)
     receipt_stmt = select(OneCReceipt).where(
         OneCReceipt.excluded.is_(False),
         OneCReceipt.registrar_date.is_not(None),
@@ -215,9 +225,12 @@ async def _period_baseline(
         receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
     if legal_entity and legal_entity != "all":
         receipt_stmt = receipt_stmt.where(OneCReceipt.legal_entity_key == legal_entity)
-    if (mgr and mgr != "all") or (source and source != "all"):
+    if ((mgr and mgr != "all") or (source and source != "all")
+            or (funnel and funnel != "all")):
         receipt_stmt = receipt_stmt.join(Deal, OneCReceipt.matched_deal_id == Deal.id)
-        receipt_stmt = _by_deal_filters(receipt_stmt, mgr, source, legal_entity)
+        receipt_stmt = _by_deal_filters(
+            receipt_stmt, mgr, source, legal_entity, funnel
+        )
     receipts = (await session.execute(receipt_stmt)).scalars().all()
     if settings.onec_endpoint:
         revenue = sum((receipt.amount for receipt in receipts), start=0)
@@ -253,11 +266,14 @@ async def _base_and_mult(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> tuple[dict[str, float], float]:
     """Базлайн и множитель: боевой режим — реальная фильтрация по датам (mult=1),
     демо — сохранённый сид × коэффициент периода (как в прототипе)."""
     if settings.data_source == "real":
-        return await _period_baseline(session, period, mgr, source, legal_entity), 1.0
+        return await _period_baseline(
+            session, period, mgr, source, legal_entity, funnel
+        ), 1.0
     return await _baselines(session), per.mult(period)
 
 
@@ -277,8 +293,11 @@ async def kpis(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
-    base, m = await _base_and_mult(session, period, mgr, source, legal_entity)
+    base, m = await _base_and_mult(
+        session, period, mgr, source, legal_entity, funnel
+    )
     cards = (await session.execute(select(KpiCard).order_by(KpiCard.position))).scalars().all()
     # В боевом режиме демо-дельты и спарклайны из сида не показываем — только
     # реальные значения (тренд формируется на этапе накопления истории).
@@ -286,7 +305,9 @@ async def kpis(
     # Каналы нужны для реального ROMI (карта с static_value в прототипе — «+197%»),
     # и считаются за выбранный период — иначе ROMI не отвечает на переключатель.
     channels_rows = (
-        await _period_channels(session, period, mgr, source, legal_entity) if real else []
+        await _period_channels(
+            session, period, mgr, source, legal_entity, funnel
+        ) if real else []
     )
 
     out: list[dict] = []
@@ -351,9 +372,24 @@ async def filter_options(session: AsyncSession) -> dict:
         .where(*countable, Deal.src.is_not(None), Deal.src != "—")
         .distinct()
     )).scalars().all()
+    funnel_rows = (await session.execute(
+        select(Deal.crm_source, Deal.funnel_id, func.max(Deal.funnel_name))
+        .where(*countable, Deal.funnel_id != "")
+        .group_by(Deal.crm_source, Deal.funnel_id)
+    )).all()
     from app.services import business_settings
 
     configured = await business_settings.get_settings(session)
+    configured_funnels = {
+        (str(item.get("crm_source")), str(item.get("external_id"))): str(
+            item.get("name") or ""
+        )
+        for item in configured.get("funnels", [])
+    }
+    source_names = {
+        str(item.get("key")): str(item.get("name") or item.get("key") or "")
+        for item in configured.get("crm_sources", [])
+    }
     entities = [
         {"value": item["key"], "label": item["name"]}
         for item in configured.get("legal_entities", [])
@@ -364,6 +400,22 @@ async def filter_options(session: AsyncSession) -> dict:
         "channels": list(chans),
         "sources": sorted({s for s in srcs if s}),
         "legal_entities": entities,
+        "funnels": [
+            {
+                "value": f"{crm_source}:{funnel_id}",
+                "label": (
+                    configured_funnels.get((crm_source, funnel_id))
+                    or funnel_name
+                    or f"Воронка {funnel_id}"
+                ) + (
+                    f" · {source_names[crm_source]}"
+                    if crm_source in source_names else ""
+                ),
+            }
+            for crm_source, funnel_id, funnel_name in sorted(
+                funnel_rows, key=lambda row: ((row[2] or "").lower(), row[0], row[1])
+            )
+        ],
     }
 
 
@@ -373,8 +425,11 @@ async def funnel(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
-    base, m = await _base_and_mult(session, period, mgr, source, legal_entity)
+    base, m = await _base_and_mult(
+        session, period, mgr, source, legal_entity, funnel
+    )
     stages = [
         ("leads", "Лиды"), ("qual", "Квалификация"), ("deals", "Сделки"),
         ("invoices", "Счета"), ("payments", "Оплаты"),
@@ -389,6 +444,7 @@ _SOURCE_COLORS = ["#635BFF", "#9E77ED", "#1BA9C7", "#12B76A", "#F79009", "#F0443
 async def sources(
     session: AsyncSession, period: str = per.DEFAULT_PERIOD,
     mgr: str = "all", source: str = "all", legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
     """Источники лидов за период.
 
@@ -403,7 +459,7 @@ async def sources(
             for c in chs
         ]
 
-    deals = await period_deals(session, period, mgr, source, legal_entity)
+    deals = await period_deals(session, period, mgr, source, legal_entity, funnel)
     counts: dict[str, int] = {}
     for d in deals:
         counts[d.src or "—"] = counts.get(d.src or "—", 0) + 1
@@ -421,8 +477,11 @@ async def revenue_series(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> dict:
-    base, m = await _base_and_mult(session, period, mgr, source, legal_entity)
+    base, m = await _base_and_mult(
+        session, period, mgr, source, legal_entity, funnel
+    )
     days = ["09", "11", "13", "15", "17"] if per.norm_period(period) == "today" \
         else ["1", "5", "10", "15", "20", "25", "30"]
     total_rev = base.get("revenue", 0) * m
@@ -445,13 +504,15 @@ async def _period_channels(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
     """Каналы за период (посуточное сырьё) либо сохранённые строки как резерв."""
     from app.services import channels as ch_svc
 
     rebuilt = (
         await ch_svc.for_period(
-            session, period, mgr=mgr, source=source, legal_entity=legal_entity
+            session, period, mgr=mgr, source=source, legal_entity=legal_entity,
+            funnel=funnel,
         )
         if settings.data_source == "real" else None
     )
@@ -468,8 +529,9 @@ async def _period_channels(
 async def romi_by_channel(
     session: AsyncSession, period: str = per.DEFAULT_PERIOD,
     mgr: str = "all", source: str = "all", legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
-    chs = await _period_channels(session, period, mgr, source, legal_entity)
+    chs = await _period_channels(session, period, mgr, source, legal_entity, funnel)
     out = []
     for c in chs:
         r = f.romi_of(c["spend"], c["margin"])
@@ -483,6 +545,7 @@ async def attention(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> dict:
     """Блок «Что требует внимания сейчас».
 
@@ -493,7 +556,7 @@ async def attention(
     from app.services.integrations_config import get_recompute_status
 
     res = await vio.evaluate_current(
-        session, mgr=mgr, source=source, legal_entity=legal_entity
+        session, mgr=mgr, source=source, legal_entity=legal_entity, funnel=funnel
     )
     regular = res["regular"]
     review = res["review"]
@@ -501,7 +564,7 @@ async def attention(
     money_at_risk = vio.money_at_risk(regular, cap)
     risk_stmt = select(Deal).where(Deal.risk.is_not(None), Deal.on_dashboard.is_(True))
     risk_leads = (await session.execute(
-        _by_deal_filters(risk_stmt, mgr, source, legal_entity)
+        _by_deal_filters(risk_stmt, mgr, source, legal_entity, funnel)
     )).scalars().all()
 
     # Реальные счётчики и суммы по типам нарушений (сумма — с дедупом и фильтром выбросов).
@@ -569,6 +632,7 @@ async def _managers_from_deals(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
     """Агрегаты по менеджерам из реальных сделок Битрикс24 (боевой режим).
 
@@ -586,7 +650,7 @@ async def _managers_from_deals(
     if end is not None:
         stmt = stmt.where(Deal.created_at < end)
     deals = (
-        await session.execute(_by_deal_filters(stmt, mgr, source, legal_entity))
+        await session.execute(_by_deal_filters(stmt, mgr, source, legal_entity, funnel))
     ).scalars().all()
     if not deals:
         return []
@@ -594,7 +658,7 @@ async def _managers_from_deals(
     # Нарушения по менеджерам: просрочки (over) и «нет задачи» (ptype no_task).
     from app.services import violations as vio
     evaluated = await vio.evaluate_current(
-        session, mgr=mgr, source=source, legal_entity=legal_entity
+        session, mgr=mgr, source=source, legal_entity=legal_entity, funnel=funnel
     )
     overdue: dict[str, int] = {}
     notask: dict[str, int] = {}
@@ -631,7 +695,8 @@ async def _managers_from_deals(
         if end is not None:
             receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
         receipt_stmt = _by_deal_filters(
-            receipt_stmt, mgr=mgr, source=source, legal_entity=legal_entity
+            receipt_stmt, mgr=mgr, source=source, legal_entity=legal_entity,
+            funnel=funnel,
         )
         for manager_name, count, amount in (await session.execute(receipt_stmt)).all():
             item = agg.setdefault(
@@ -670,9 +735,12 @@ async def _managers_from_deals(
 async def managers(
     session: AsyncSession, period: str = per.DEFAULT_PERIOD,
     mgr: str = "all", source: str = "all", legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
     if settings.data_source == "real":
-        return await _managers_from_deals(session, period, mgr, source, legal_entity)
+        return await _managers_from_deals(
+            session, period, mgr, source, legal_entity, funnel
+        )
     rows = (await session.execute(
         select(ManagerControl).order_by(ManagerControl.position)
     )).scalars().all()
@@ -690,6 +758,7 @@ async def managers(
 async def leads(
     session: AsyncSession, mgr: str = "all", source: str = "all",
     risk: str | None = None, period: str = "30", legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict]:
     stmt = select(Deal).where(Deal.on_dashboard.is_(True))
     # В боевом режиме список лидов следует выбранному периоду (по дате создания),
@@ -701,7 +770,7 @@ async def leads(
         stmt = stmt.where(Deal.created_at.is_not(None), Deal.created_at >= start)
         if end is not None:
             stmt = stmt.where(Deal.created_at < end)
-    stmt = _by_deal_filters(stmt, mgr, source, legal_entity)
+    stmt = _by_deal_filters(stmt, mgr, source, legal_entity, funnel)
     if risk == "risk":
         stmt = stmt.where(Deal.risk.is_not(None))
     stmt = stmt.order_by(Deal.position)

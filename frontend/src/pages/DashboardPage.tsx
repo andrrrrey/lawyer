@@ -33,6 +33,7 @@ export default function DashboardPage() {
     legalEntity: f.legalEntity,
     mgr: f.mgr,
     source: f.source,
+    funnel: f.funnel,
   };
   const kpis = useKpis(q);
   const attention = useAttention(q);
@@ -41,7 +42,9 @@ export default function DashboardPage() {
   const expenses = useExpensesByArticle(q);
   const romi = useRomiByChannel(q);
   const managers = useManagers(q);
-  const leads = useLeads(f.mgr, f.source, f.leadFilter, f.period, f.legalEntity);
+  const leads = useLeads(
+    f.mgr, f.source, f.leadFilter, f.period, f.legalEntity, f.funnel,
+  );
 
   return (
     <>

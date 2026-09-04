@@ -16,6 +16,7 @@ async def evaluate_current(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> dict:
     """Возвращает {'regular': [...], 'review': [...]} по текущим данным и настройкам.
 
@@ -28,6 +29,13 @@ async def evaluate_current(
         stmt = stmt.where(Deal.src == source)
     if legal_entity and legal_entity != "all":
         stmt = stmt.where(Deal.legal_entity_key == legal_entity)
+    if funnel and funnel != "all":
+        crm_source, separator, funnel_id = funnel.partition(":")
+        if separator and crm_source and funnel_id:
+            stmt = stmt.where(
+                Deal.crm_source == crm_source,
+                Deal.funnel_id == funnel_id,
+            )
     deals = (await session.execute(stmt)).scalars().all()
     config = await content.regulation(session)
     business_config = await business_settings.get_settings(session)

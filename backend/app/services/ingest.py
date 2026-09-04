@@ -846,6 +846,9 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
                 has_open_action=str(nd.get("external_id")) in action_ids,
                 legal_entity_key=entity_key,
             )
+            fresh.funnel_name = business.funnel_name(
+                business_config, source_key, fresh.funnel_id
+            )[:128]
             position += 1
             ext = fresh.external_id
             identity = (fresh.crm_source, fresh.entity_type, ext or "")
@@ -1079,6 +1082,9 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
             has_open_action=str(nd.get("external_id")) in action_ids,
             legal_entity_key=entity_key,
         )
+        deal.funnel_name = business.funnel_name(
+            business_config, source_key, deal.funnel_id
+        )[:128]
         deal_rows.append(deal)
         session.add(deal)
     await session.flush()

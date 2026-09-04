@@ -50,6 +50,7 @@ async def for_period(
     mgr: str = "all",
     source: str = "all",
     legal_entity: str = "all",
+    funnel: str = "all",
 ) -> list[dict] | None:
     """Каналы/кампании за период или None, если посуточного сырья ещё нет."""
     if not await has_daily_costs(session):
@@ -107,6 +108,13 @@ async def for_period(
         stmt = stmt.where(Deal.src == source)
     if legal_entity and legal_entity != "all":
         stmt = stmt.where(Deal.legal_entity_key == legal_entity)
+    if funnel and funnel != "all":
+        crm_source, separator, funnel_id = funnel.partition(":")
+        if separator and crm_source and funnel_id:
+            stmt = stmt.where(
+                Deal.crm_source == crm_source,
+                Deal.funnel_id == funnel_id,
+            )
     deals = (await session.execute(stmt)).scalars().all()
 
     receipt_where = [
@@ -118,6 +126,12 @@ async def for_period(
         receipt_where.append(OneCReceipt.registrar_date < end)
     if legal_entity and legal_entity != "all":
         receipt_where.append(OneCReceipt.legal_entity_key == legal_entity)
+    if funnel and funnel != "all":
+        # Поступления без связанной сделки нельзя достоверно отнести к воронке.
+        crm_source, separator, funnel_id = funnel.partition(":")
+        if separator and crm_source and funnel_id:
+            allowed_deal_ids = {deal.id for deal in deals}
+            receipt_where.append(OneCReceipt.matched_deal_id.in_(allowed_deal_ids))
     receipts = (
         await session.execute(select(OneCReceipt).where(*receipt_where))
     ).scalars().all()

@@ -60,6 +60,7 @@ export interface DashFilters {
   mgr: string;
   source: string;
   legalEntity: string;
+  funnel: string;
 }
 
 const qs = (f: DashFilters) => {
@@ -67,17 +68,19 @@ const qs = (f: DashFilters) => {
   if (f.mgr && f.mgr !== "all") q.set("mgr", f.mgr);
   if (f.source && f.source !== "all") q.set("source", f.source);
   if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
+  if (f.funnel && f.funnel !== "all") q.set("funnel", f.funnel);
   return `?${q.toString()}`;
 };
 
 // Ключ кэша запроса: меняется вместе с любым из фильтров.
-const key = (f: DashFilters) => [f.period, f.legalEntity, f.mgr, f.source];
+const key = (f: DashFilters) => [f.period, f.legalEntity, f.funnel, f.mgr, f.source];
 
 export interface FilterOptions {
   managers: string[];
   channels: string[];
   sources: string[];
   legal_entities: { value: string; label: string }[];
+  funnels: { value: string; label: string }[];
 }
 
 export const useFilterOptions = () =>
@@ -92,7 +95,7 @@ export const useKpis = (f: DashFilters) =>
 
 export const useAttention = (f: DashFilters) =>
   useQuery<Attention>({
-    queryKey: ["dashboard", "attention", f.legalEntity, f.mgr, f.source],
+    queryKey: ["dashboard", "attention", f.legalEntity, f.funnel, f.mgr, f.source],
     // Триаж показывает состояние «сейчас» — период к нему не применяется,
     // но менеджер и источник сужают выборку.
     queryFn: () => {
@@ -100,6 +103,7 @@ export const useAttention = (f: DashFilters) =>
       if (f.mgr && f.mgr !== "all") q.set("mgr", f.mgr);
       if (f.source && f.source !== "all") q.set("source", f.source);
       if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
+      if (f.funnel && f.funnel !== "all") q.set("funnel", f.funnel);
       const s = q.toString();
       return api.get(`/dashboard/attention${s ? `?${s}` : ""}`);
     },
@@ -135,14 +139,16 @@ export const useLeads = (
   risk: string | null,
   period: string,
   legalEntity: string,
+  funnel: string,
 ) =>
   useQuery<Lead[]>({
-    queryKey: ["dashboard", "leads", legalEntity, mgr, source, risk, period],
+    queryKey: ["dashboard", "leads", legalEntity, funnel, mgr, source, risk, period],
     queryFn: () => {
       const q = new URLSearchParams();
       if (mgr && mgr !== "all") q.set("mgr", mgr);
       if (source && source !== "all") q.set("source", source);
       if (legalEntity && legalEntity !== "all") q.set("legal_entity", legalEntity);
+      if (funnel && funnel !== "all") q.set("funnel", funnel);
       if (risk) q.set("risk", risk);
       if (period) q.set("period", period);
       const qs = q.toString();

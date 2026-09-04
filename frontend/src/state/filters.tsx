@@ -9,12 +9,14 @@ export interface FiltersState {
   mgr: string;
   source: string;
   legalEntity: string;
+  funnel: string;
   leadFilter: string | null;
   setPeriod: (v: string) => void;
   setChannel: (v: string) => void;
   setMgr: (v: string) => void;
   setSource: (v: string) => void;
   setLegalEntity: (v: string) => void;
+  setFunnel: (v: string) => void;
   setLeadFilter: (v: string | null) => void;
 }
 
@@ -26,14 +28,15 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
   const [mgr, setMgr] = useState("all");
   const [source, setSource] = useState("all");
   const [legalEntity, setLegalEntity] = useState("all");
+  const [funnel, setFunnel] = useState("all");
   const [leadFilter, setLeadFilter] = useState<string | null>(null);
 
   const value = useMemo(
     () => ({
-      period, channel, mgr, source, legalEntity, leadFilter,
-      setPeriod, setChannel, setMgr, setSource, setLegalEntity, setLeadFilter,
+      period, channel, mgr, source, legalEntity, funnel, leadFilter,
+      setPeriod, setChannel, setMgr, setSource, setLegalEntity, setFunnel, setLeadFilter,
     }),
-    [period, channel, mgr, source, legalEntity, leadFilter],
+    [period, channel, mgr, source, legalEntity, funnel, leadFilter],
   );
 
   return <FiltersContext.Provider value={value}>{children}</FiltersContext.Provider>;

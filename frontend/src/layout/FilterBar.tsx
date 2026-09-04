@@ -19,9 +19,9 @@ const PERIODS = [
 // Какие контролы фильтров релевантны на каждой странице. На страницах, которых
 // нет в конфиге (ROMI, AI, Мониторинг, Интеграции, Админ), панель не показывается —
 // эти разделы не используют фильтры.
-type Control = "period" | "legalEntity" | "channel" | "mgr" | "source";
+type Control = "period" | "legalEntity" | "funnel" | "channel" | "mgr" | "source";
 const PAGE_FILTERS: Record<string, Control[]> = {
-  "/dashboard": ["period", "legalEntity", "mgr", "source"],
+  "/dashboard": ["period", "legalEntity", "funnel", "mgr", "source"],
   "/analytics": ["period", "legalEntity", "channel"],
   "/romi": ["period", "legalEntity"],
 };
@@ -147,7 +147,11 @@ export function FilterBar() {
         <Select
           className="fb-select"
           value={f.legalEntity}
-          onChange={(value) => { f.setLegalEntity(value); f.setLeadFilter(null); }}
+          onChange={(value) => {
+            f.setLegalEntity(value);
+            f.setFunnel("all");
+            f.setLeadFilter(null);
+          }}
           options={[
             { value: "all", label: "Все юрлица" },
             ...(o.data?.legal_entities ?? []),
@@ -160,6 +164,17 @@ export function FilterBar() {
           value={f.channel}
           onChange={f.setChannel}
           options={opts("Все каналы", o.data?.channels ?? [])}
+        />
+      ) : null}
+      {controls.includes("funnel") ? (
+        <Select
+          className="fb-select"
+          value={f.funnel}
+          onChange={(value) => { f.setFunnel(value); f.setLeadFilter(null); }}
+          options={[
+            { value: "all", label: "Все воронки" },
+            ...(o.data?.funnels ?? []),
+          ]}
         />
       ) : null}
       {controls.includes("mgr") ? (
