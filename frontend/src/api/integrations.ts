@@ -69,6 +69,7 @@ export interface AiGenerateResult {
   count?: number;
   insights?: number;
   budget_recs?: number;
+  deal_comments?: number;
   reason?: string;
 }
 

@@ -69,6 +69,8 @@ class Deal(Base):
     risk: Mapped[str | None] = mapped_column(String(16), nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     ai_comment: Mapped[str] = mapped_column(String, default="")
+    ai_comment_source: Mapped[str] = mapped_column(String(16), default="baseline")
+    ai_comment_fingerprint: Mapped[str] = mapped_column(String(64), default="")
     refuse_reason: Mapped[str] = mapped_column(String(255), default="")
 
     # Задел под регламент (Этап C)

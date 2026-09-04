@@ -891,6 +891,8 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
             stage_names=dictionaries[1],
             modified_after=None if full else since,
         )
+    from app.services import deal_comments
+    comments = await deal_comments.refresh_baseline(session)
     logger.info(
         "Сверка сделок Битрикс24: создано=%d обновлено=%d удалено=%d источники=%d (full=%s)",
         created, updated, removed, normalized, full,
@@ -898,6 +900,7 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     return {
         "skipped": False, "created": created, "updated": updated,
         "removed": removed, "full": full, "timeline": timeline,
+        "deal_comments": comments,
     }
 
 
@@ -1218,11 +1221,14 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
         session.add(Baseline(key=key, value=value))
 
     await session.commit()
+    from app.services import deal_comments
+    comments = await deal_comments.refresh_baseline(session)
     stats = {
         "deals": len(deals),
         "channels": len(channels),
         "receipts": len(receipts),
         "receipts_included": sum(1 for row in receipts if not row.get("excluded")),
+        "deal_comments": comments["count"],
     }
     logger.info("ingest завершён: %s", stats)
     return {"mode": "real", "sources": sources, "stats": stats}

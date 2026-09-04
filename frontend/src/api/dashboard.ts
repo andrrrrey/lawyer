@@ -68,7 +68,7 @@ export interface DepartmentAnalytics {
 export interface Lead {
   name: string; src: string; mgr: string; status_label: string; status_class: string;
   fc: string; call: boolean; inv: boolean; pay: boolean; amount: number; amount_display: string;
-  risk: string | null; tags: string[]; ai: string; reason: string;
+  risk: string | null; tags: string[]; ai: string; ai_source: "baseline" | "llm"; reason: string;
   legal_entity_key: string;
 }
 

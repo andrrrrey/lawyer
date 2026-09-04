@@ -67,7 +67,7 @@ export function LeadsTable({ rows }: { rows: Lead[] }) {
                   <td style={{ textAlign: "center" }}><Dot on={l.pay} /></td>
                   <td className="money num">{l.amount_display === "Скрыто" ? "Скрыто" : l.amount ? l.amount_display : "—"}</td>
                   <td>
-                    <div className="ai-cell"><SparkleIcon />{l.ai}</div>
+                    <div className="ai-cell" title={l.ai_source === "llm" ? "Сформировано AI" : "Автоматически по данным CRM и SLA"}><SparkleIcon />{l.ai || "Комментарий формируется"}</div>
                   </td>
                 </tr>
               ))

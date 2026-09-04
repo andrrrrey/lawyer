@@ -1010,7 +1010,8 @@ async def leads(
             "status_label": d.status_label, "status_class": d.status_class,
             "fc": d.first_contact, "call": d.call, "inv": d.invoice, "pay": d.paid,
             "amount": d.amount, "amount_display": f.money(d.amount) if d.amount else "—",
-            "risk": d.risk, "tags": d.tags, "ai": d.ai_comment, "reason": d.refuse_reason,
+            "risk": d.risk, "tags": d.tags, "ai": d.ai_comment,
+            "ai_source": d.ai_comment_source, "reason": d.refuse_reason,
         }
         for d in rows
     ]

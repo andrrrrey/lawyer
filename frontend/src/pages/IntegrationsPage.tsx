@@ -269,7 +269,7 @@ export default function IntegrationsPage() {
       const res = await generateAi.mutateAsync();
       if (res.generated) {
         message.success(
-          `AI-советы обновлены · инсайтов: ${res.insights ?? 0}, рекомендаций по бюджету: ${res.budget_recs ?? 0}`,
+          `AI-советы обновлены · комментариев по сделкам: ${res.deal_comments ?? 0}, инсайтов: ${res.insights ?? 0}, рекомендаций по бюджету: ${res.budget_recs ?? 0}`,
         );
       } else {
         message.warning("AI-интеграция не подключена — генерация пропущена");

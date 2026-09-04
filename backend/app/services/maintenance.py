@@ -47,14 +47,16 @@ def run_blocking(coro_factory: Callable[[], Awaitable[dict[str, Any]]]) -> dict[
 # --------------------------- Генерация AI (синхронно) ---------------------------
 
 async def _generate_ai(session: AsyncSession) -> dict[str, Any]:
-    from app.services import ai_layer
+    from app.services import ai_layer, deal_comments
 
     # Инсайты и рекомендации по бюджету — два независимых вызова LLM. Инсайты
     # коммитятся первыми: сбой генерации рекомендаций не должен откатывать их.
+    comments = await deal_comments.generate_with_llm(session)
     insights = await ai_layer.generate_insights(session)
     result: dict[str, Any] = {
-        "generated": bool(insights.get("generated")),
+        "generated": bool(comments.get("generated") or insights.get("generated")),
         "insights": insights.get("count", 0),
+        "deal_comments": comments.get("count", 0),
     }
     if not insights.get("generated"):
         result["reason"] = insights.get("reason")
@@ -67,7 +69,7 @@ async def _generate_ai(session: AsyncSession) -> dict[str, Any]:
         result["budget_recs"] = 0
         result["budget_recs_error"] = str(exc)
     # Совместимость с UI: total-счётчик карточек (инсайты + рекомендации).
-    result["count"] = result["insights"] + result["budget_recs"]
+    result["count"] = result["insights"] + result["budget_recs"] + result["deal_comments"]
     return result
 
 
