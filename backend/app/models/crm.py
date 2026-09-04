@@ -95,6 +95,9 @@ class Deal(Base):
     stage_history: Mapped[list[StageHistory]] = relationship(
         back_populates="deal", cascade="all, delete-orphan"
     )
+    activities: Mapped[list[CrmActivity]] = relationship(
+        back_populates="deal", cascade="all, delete-orphan"
+    )
     tasks: Mapped[list[Task]] = relationship(back_populates="deal", cascade="all, delete-orphan")
 
 
@@ -102,6 +105,11 @@ class StageHistory(Base):
     """История переходов сделки по этапам воронки (для контроля сроков, Этап C)."""
 
     __tablename__ = "stage_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "deal_id", "to_stage", "changed_at", name="uq_stage_history_transition"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"))
@@ -110,6 +118,37 @@ class StageHistory(Base):
     changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     deal: Mapped[Deal] = relationship(back_populates="stage_history")
+
+
+class CrmActivity(Base):
+    """Звонок или встреча из таймлайна сделки Bitrix24.
+
+    ``external_id`` уникален только внутри портала, поэтому идентичность строки
+    включает локальную сделку. Храним нормализованные поля без текста переписки
+    и записей разговоров — для SLA и аналитики нужны только тип, даты и статус.
+    """
+
+    __tablename__ = "crm_activities"
+    __table_args__ = (
+        UniqueConstraint("deal_id", "external_id", name="uq_crm_activity_deal_external"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"))
+    external_id: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16))  # call | meeting
+    subject: Mapped[str] = mapped_column(String(255), default="")
+    responsible_id: Mapped[str] = mapped_column(String(32), default="")
+    occurred_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_sec: Mapped[int] = mapped_column(Integer, default=0)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    direction: Mapped[str] = mapped_column(String(16), default="")
+    provider_id: Mapped[str] = mapped_column(String(64), default="")
+
+    deal: Mapped[Deal] = relationship(back_populates="activities")
 
 
 class Task(Base):

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -45,9 +46,16 @@ def _call(
             data = resp.json()
             result = data.get("result", [])
             if isinstance(result, dict):  # некоторые методы возвращают объект
-                out.append(result)
-                break
-            out.extend(result)
+                # crm.stagehistory.list кладёт строки во вложенный result.items,
+                # но next/total оставляет во внешнем конверте как обычные crm.*.
+                items = result.get("items")
+                if isinstance(items, list):
+                    out.extend(items)
+                else:
+                    out.append(result)
+                    break
+            else:
+                out.extend(result)
             nxt = data.get("next")
             if not nxt:
                 break
@@ -128,6 +136,88 @@ def normalize_deal(raw: dict, extra_fields: dict[str, str] | None = None) -> dic
     }
 
 
+def normalize_stage_history(raw: dict) -> dict | None:
+    """Строка ``crm.stagehistory.list`` → нейтральная запись синхронизации."""
+    owner_id = raw.get("OWNER_ID") or raw.get("ownerId")
+    stage_id = raw.get("STAGE_ID") or raw.get("stageId")
+    changed_at = (
+        raw.get("CREATED_TIME") or raw.get("createdTime")
+        or raw.get("CREATED_DATE") or raw.get("createdDate")
+    )
+    if owner_id is None or not stage_id:
+        return None
+    external_id = raw.get("ID") or raw.get("id")
+    if external_id is None:
+        external_id = f"{owner_id}:{stage_id}:{changed_at or ''}"
+    return {
+        "external_id": str(external_id),
+        "deal_external_id": str(owner_id),
+        "stage_id": str(stage_id),
+        "changed_at": changed_at,
+    }
+
+
+def _activity_kind(raw: dict) -> str | None:
+    try:
+        activity_type = int(raw.get("TYPE_ID") or raw.get("typeId") or 0)
+    except (TypeError, ValueError):
+        activity_type = 0
+    provider = str(
+        raw.get("PROVIDER_ID") or raw.get("providerId") or ""
+    ).lower()
+    if activity_type == 2 or "call" in provider:
+        return "call"
+    if activity_type == 1 or "meeting" in provider:
+        return "meeting"
+    return None
+
+
+def _duration_seconds(start: Any, end: Any, raw_duration: Any = None) -> int:
+    try:
+        if raw_duration not in (None, ""):
+            return max(0, int(float(raw_duration)))
+    except (TypeError, ValueError):
+        pass
+    try:
+        left = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        right = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+        return max(0, round((right - left).total_seconds()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def normalize_activity(raw: dict) -> dict | None:
+    """Оставляет из CRM-активности только звонки и встречи."""
+    activity_id = raw.get("ID") or raw.get("id")
+    owner_id = raw.get("OWNER_ID") or raw.get("ownerId")
+    kind = _activity_kind(raw)
+    if activity_id is None or owner_id is None or kind is None:
+        return None
+    started = (
+        raw.get("START_TIME") or raw.get("startTime")
+        or raw.get("CREATED") or raw.get("created")
+    )
+    ended = raw.get("END_TIME") or raw.get("endTime")
+    return {
+        "external_id": str(activity_id),
+        "deal_external_id": str(owner_id),
+        "kind": kind,
+        "subject": str(raw.get("SUBJECT") or raw.get("subject") or ""),
+        "responsible_id": str(
+            raw.get("RESPONSIBLE_ID") or raw.get("responsibleId") or ""
+        ),
+        "occurred_at": started,
+        "ended_at": ended,
+        "duration_sec": _duration_seconds(
+            started, ended, raw.get("DURATION") or raw.get("duration")
+        ),
+        "completed": str(raw.get("COMPLETED") or raw.get("completed") or "").upper()
+        in {"Y", "1", "TRUE"},
+        "direction": str(raw.get("DIRECTION") or raw.get("direction") or ""),
+        "provider_id": str(raw.get("PROVIDER_ID") or raw.get("providerId") or ""),
+    }
+
+
 class RealBitrix24Adapter:
     def __init__(self, webhook_url: str | None = None, source_key: str = "primary") -> None:
         self.webhook_url = webhook_url
@@ -192,8 +282,56 @@ class RealBitrix24Adapter:
             out.append({"code": code, "title": str(title)})
         return out
 
-    def fetch_stage_history(self) -> list[dict]:
-        return self._call("crm.stagehistory.list", {"entityTypeId": 2})
+    def fetch_stage_history(
+        self, deal_ids: list[str] | None = None, changed_after: str | None = None
+    ) -> list[dict]:
+        """История стадий выбранных сделок, нормализованная для ingest."""
+        ids = [str(item) for item in (deal_ids or []) if item]
+        batches = [ids[i:i + _PAGE] for i in range(0, len(ids), _PAGE)] if ids else [[]]
+        out: list[dict] = []
+        for batch in batches:
+            filters: dict[str, Any] = {}
+            if batch:
+                filters["@OWNER_ID"] = batch
+            if changed_after:
+                filters[">=CREATED_TIME"] = changed_after
+            params: dict[str, Any] = {
+                "entityTypeId": 2,
+                "order": {"CREATED_TIME": "ASC"},
+            }
+            if filters:
+                params["filter"] = filters
+            for row in self._call("crm.stagehistory.list", params):
+                normalized = normalize_stage_history(row)
+                if normalized is not None:
+                    out.append(normalized)
+        return out
+
+    def fetch_activities(
+        self, deal_ids: list[str], modified_after: str | None = None
+    ) -> list[dict]:
+        """Звонки и встречи сделок через ``crm.activity.list``."""
+        ids = [str(item) for item in deal_ids if item]
+        out: list[dict] = []
+        for i in range(0, len(ids), _PAGE):
+            batch = ids[i:i + _PAGE]
+            filters: dict[str, Any] = {"OWNER_TYPE_ID": 2, "@OWNER_ID": batch}
+            if modified_after:
+                filters[">=LAST_UPDATED"] = modified_after
+            rows = self._call("crm.activity.list", {
+                "filter": filters,
+                "order": {"LAST_UPDATED": "ASC"},
+                "select": [
+                    "ID", "OWNER_ID", "TYPE_ID", "PROVIDER_ID", "PROVIDER_TYPE_ID",
+                    "SUBJECT", "START_TIME", "END_TIME", "CREATED", "LAST_UPDATED",
+                    "COMPLETED", "RESPONSIBLE_ID", "DIRECTION",
+                ],
+            })
+            for row in rows:
+                normalized = normalize_activity(row)
+                if normalized is not None:
+                    out.append(normalized)
+        return out
 
     def fetch_users(self) -> list[dict]:
         """Справочник сотрудников портала: [{"id", "name"}] для резолва ID → ФИО."""

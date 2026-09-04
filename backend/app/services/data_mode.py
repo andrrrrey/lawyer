@@ -20,6 +20,7 @@ from app.models import (
     Call,
     Campaign,
     Channel,
+    CrmActivity,
     Deal,
     ManagerControl,
     MinusWord,
@@ -38,7 +39,7 @@ logger = get_logger("lawyer.data_mode")
 # (дети раньше родителей). Реальные данные наполняются пересчётом/генерацией.
 # НЕ трогаем: KpiCard (структура карточек), RegulationConfig (настройки).
 _PURGE_ORDER = [
-    StageHistory, Task, Payment, Call, Campaign,
+    StageHistory, CrmActivity, Task, Payment, Call, Campaign,
     Deal, Channel, Violation, ManagerControl, Baseline,
     AiInsight, BudgetRec, MinusWord, Product,
     # Посуточное сырьё источников: при смене режима оно устаревает вместе с

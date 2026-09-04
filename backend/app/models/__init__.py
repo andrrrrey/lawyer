@@ -7,7 +7,7 @@ from app.models.analytics import (
     KpiCard,
     MinusWord,
 )
-from app.models.crm import Deal, ManagerControl, StageHistory, Task, Violation
+from app.models.crm import CrmActivity, Deal, ManagerControl, StageHistory, Task, Violation
 from app.models.marketing import (
     AdCost,
     Call,
@@ -35,6 +35,7 @@ __all__ = [
     "Call",
     "Campaign",
     "Channel",
+    "CrmActivity",
     "Deal",
     "IntegrationSettings",
     "KpiCard",

@@ -11,6 +11,7 @@ import asyncio
 import pathlib
 import tempfile
 from collections.abc import Callable, Coroutine
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -21,10 +22,44 @@ import app.models  # noqa: F401 — регистрирует таблицы
 from app.core.config import settings
 from app.core.db import Base
 from app.integrations import factory
-from app.models import Deal, Task
+from app.models import CrmActivity, Deal, StageHistory, Task
 from app.services import ingest
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_sync_test.db"
+
+
+def test_datetime_identity_normalizes_timezone() -> None:
+    """Один момент времени не дублируется из-за часового пояса Bitrix."""
+    bitrix_time = datetime.fromisoformat("2026-08-04T15:00:00+03:00")
+    database_time = datetime.fromisoformat("2026-08-04T12:00:00+00:00")
+
+    assert ingest._dt_identity(bitrix_time) == ingest._dt_identity(database_time)
+
+
+def test_stage_history_long_name_is_idempotent(monkeypatch) -> None:
+    """Длинное название стадии сравнивается в том же виде, что хранится в БД."""
+    async def check(s: AsyncSession) -> None:
+        portal = FakeBitrix([_raw("100", title="Сделка", stage="LONG")])
+        portal.history = [{
+            "external_id": "h1",
+            "deal_external_id": "100",
+            "stage_id": "LONG",
+            "changed_at": "2026-08-01T10:00:00+03:00",
+        }]
+        portal.stages = [
+            {"id": "LONG", "name": "Очень длинное название стадии " * 4}
+        ]
+        monkeypatch.setattr(factory, "get_bitrix24", lambda: portal)
+
+        await ingest.refresh_deals(s, full=True)
+        result = await ingest.refresh_deals(s, full=True)
+
+        assert result["timeline"]["primary"]["history_created"] == 0
+        rows = (await s.execute(select(StageHistory))).scalars().all()
+        assert len(rows) == 1
+        assert len(rows[0].to_stage) == 64
+
+    with_db(check)
 
 
 def _raw(deal_id: str, *, title: str, stage: str = "NEW", mgr: str = "12",
@@ -44,6 +79,12 @@ class FakeBitrix:
 
     def __init__(self, deals: list[dict]) -> None:
         self.deals = deals
+        self.history: list[dict] = []
+        self.activities: list[dict] = []
+        self.stages = [
+            {"id": "NEW", "name": "Новое обращение"},
+            {"id": "WON", "name": "Оплачено"},
+        ]
         self.last_call: dict[str, Any] = {}
 
     def fetch_deals(self, created_after=None, extra_fields=None, modified_after=None):
@@ -54,13 +95,22 @@ class FakeBitrix:
         return [{"id": "12", "name": "Михаил Иванов"}]
 
     def fetch_stages(self):
-        return [{"id": "NEW", "name": "Новое обращение"}, {"id": "WON", "name": "Оплачено"}]
+        return [dict(row) for row in self.stages]
 
     def fetch_sources(self):
         return [{"id": "site", "name": "Сайт"}]
 
     def fetch_contact_phones(self, contact_ids):  # noqa: ARG002
         return {}
+
+    def fetch_stage_history(self, deal_ids=None, changed_after=None):  # noqa: ARG002
+        return [dict(row) for row in self.history]
+
+    def fetch_activities(self, deal_ids, modified_after=None):  # noqa: ARG002
+        return [dict(row) for row in self.activities]
+
+    def fetch_open_action_deal_ids(self, deal_ids):  # noqa: ARG002
+        return set()
 
 
 def with_db(check: Callable[[AsyncSession], Coroutine[Any, Any, None]]) -> None:
@@ -104,7 +154,7 @@ def test_sync_keeps_local_tasks(monkeypatch) -> None:
         portal.deals = [_raw("100", title="ООО «ТеплоДом»", stage="WON", amount=145_000)]
         result = await ingest.refresh_deals(s)
 
-        assert result == {
+        assert {key: result[key] for key in ("skipped", "created", "updated", "removed", "full")} == {
             "skipped": False, "created": 0, "updated": 1, "removed": 0, "full": False,
         }
         deal = (await s.execute(select(Deal))).scalar_one()
@@ -113,6 +163,57 @@ def test_sync_keeps_local_tasks(monkeypatch) -> None:
         assert deal.status_class == "st-ok"
         # Задача на месте — иначе «сделка без задачи» вернулась бы в мониторинг.
         assert (await s.execute(select(Task))).scalars().all()
+
+    with_db(check)
+
+
+def test_sync_stage_history_and_activities_is_idempotent(monkeypatch) -> None:
+    """История/контакты сохраняются один раз и формируют фактические SLA-даты."""
+    async def check(s: AsyncSession) -> None:
+        portal = FakeBitrix([_raw("100", title="Сделка", stage="WON")])
+        portal.history = [
+            {
+                "external_id": "h1", "deal_external_id": "100", "stage_id": "NEW",
+                "changed_at": "2026-08-01T10:00:00+03:00",
+            },
+            {
+                "external_id": "h2", "deal_external_id": "100", "stage_id": "WON",
+                "changed_at": "2026-08-04T12:00:00+03:00",
+            },
+        ]
+        portal.activities = [
+            {
+                "external_id": "a1", "deal_external_id": "100", "kind": "call",
+                "subject": "Исходящий звонок", "responsible_id": "12",
+                "occurred_at": "2026-08-01T10:12:00+03:00",
+                "ended_at": "2026-08-01T10:15:00+03:00", "duration_sec": 180,
+                "completed": True, "direction": "2", "provider_id": "CRM_CALL",
+            },
+            {
+                "external_id": "a2", "deal_external_id": "100", "kind": "meeting",
+                "subject": "Встреча", "responsible_id": "12",
+                "occurred_at": "2026-08-03T13:00:00+03:00",
+                "ended_at": "2026-08-03T14:00:00+03:00", "duration_sec": 3600,
+                "completed": True, "direction": "", "provider_id": "CRM_MEETING",
+            },
+        ]
+        monkeypatch.setattr(factory, "get_bitrix24", lambda: portal)
+
+        first = await ingest.refresh_deals(s, full=True)
+        second = await ingest.refresh_deals(s, full=True)
+
+        assert first["timeline"]["primary"]["history_created"] == 2
+        assert first["timeline"]["primary"]["activities_created"] == 2
+        assert second["timeline"]["primary"]["history_created"] == 0
+        assert second["timeline"]["primary"]["activities_created"] == 0
+        assert len((await s.execute(select(StageHistory))).scalars().all()) == 2
+        assert len((await s.execute(select(CrmActivity))).scalars().all()) == 2
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.first_contact == "12 мин"
+        assert deal.call is True
+        assert deal.first_contact_at.isoformat().startswith("2026-08-01T10:12:00")
+        assert deal.last_activity_at.isoformat().startswith("2026-08-03T13:00:00")
+        assert deal.stage_entered_at.isoformat().startswith("2026-08-04T12:00:00")
 
     with_db(check)
 

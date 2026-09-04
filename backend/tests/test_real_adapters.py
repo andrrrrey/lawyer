@@ -25,6 +25,47 @@ def test_bitrix_normalize_deal() -> None:
     assert d["stage"] == "C1:PREPARATION"
 
 
+def test_bitrix_normalize_stage_history_and_activities() -> None:
+    history = bitrix24.normalize_stage_history({
+        "ID": 90, "OWNER_ID": 3390, "STAGE_ID": "C1:WON",
+        "CREATED_TIME": "2026-08-04T12:00:00+03:00",
+    })
+    assert history == {
+        "external_id": "90", "deal_external_id": "3390", "stage_id": "C1:WON",
+        "changed_at": "2026-08-04T12:00:00+03:00",
+    }
+
+    call = bitrix24.normalize_activity({
+        "ID": 77, "OWNER_ID": 3390, "TYPE_ID": 2, "PROVIDER_ID": "CRM_CALL",
+        "SUBJECT": "Звонок", "START_TIME": "2026-08-01T10:00:00+03:00",
+        "END_TIME": "2026-08-01T10:03:00+03:00", "COMPLETED": "Y",
+    })
+    assert call is not None
+    assert call["kind"] == "call"
+    assert call["duration_sec"] == 180
+    assert call["completed"] is True
+    assert bitrix24.normalize_activity({
+        "ID": 78, "OWNER_ID": 3390, "TYPE_ID": 4,
+    }) is None
+
+
+def test_bitrix_call_unwraps_stage_history_items(monkeypatch) -> None:
+    """crm.stagehistory.list возвращает строки в result.items, не прямо в result."""
+    class FakeResponse:
+        @staticmethod
+        def json() -> dict:
+            return {"result": {"items": [
+                {"OWNER_ID": 3390, "STAGE_ID": "NEW", "CREATED_TIME": "2026-08-01"}
+            ]}}
+
+    monkeypatch.setattr(bitrix24, "request", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(bitrix24, "_base", lambda *a, **kw: "https://portal/rest/1/x")
+    rows = bitrix24._call("crm.stagehistory.list", {"entityTypeId": 2})
+    assert rows == [
+        {"OWNER_ID": 3390, "STAGE_ID": "NEW", "CREATED_TIME": "2026-08-01"}
+    ]
+
+
 def test_onec_uses_post_with_iso_period_body(monkeypatch) -> None:
     calls: list[tuple[str, str, dict]] = []
 

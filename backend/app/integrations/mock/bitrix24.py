@@ -15,8 +15,16 @@ class MockBitrix24Adapter:
     def fetch_deal_fields(self) -> list[dict]:
         return []
 
-    def fetch_stage_history(self) -> list[dict]:
+    def fetch_stage_history(
+        self, deal_ids: list[str] | None = None, changed_after: str | None = None,  # noqa: ARG002
+    ) -> list[dict]:
         # История этапов моделируется полем stage_entered_at сделки.
+        return []
+
+    def fetch_activities(
+        self, deal_ids: list[str], modified_after: str | None = None,  # noqa: ARG002
+    ) -> list[dict]:
+        # Звонки и встречи в демо моделируются флагами сделки.
         return []
 
     def fetch_tasks(self) -> list[dict]:

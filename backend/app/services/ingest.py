@@ -31,10 +31,12 @@ from app.models import (
     BudgetRec,
     Campaign,
     Channel,
+    CrmActivity,
     Deal,
     MinusWord,
     OneCReceipt,
     Product,
+    StageHistory,
     Visit,
 )
 from app.services import business_settings as business
@@ -154,6 +156,9 @@ def _deal_from_bitrix(
         amount=int(nd.get("amount") or 0),
         first_contact="—",
         created_at=_parse_dt(nd.get("created")),
+        # Без истории новая сделка находится на первой стадии с момента создания;
+        # фактическая история ниже заменит это значение точным переходом.
+        stage_entered_at=_parse_dt(nd.get("created")),
         last_activity_at=_parse_dt(nd.get("last_activity")),
         has_open_action=has_open_action,
     )
@@ -499,6 +504,194 @@ def _apply_deal_fields(target: Deal, fresh: Deal) -> None:
         setattr(target, name, getattr(fresh, name))
 
 
+def _dt_identity(value: datetime | None) -> str:
+    """Стабильный ключ даты для сравнения PostgreSQL и SQLite."""
+    if value is None:
+        return ""
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC)
+    return value.replace(tzinfo=None).isoformat(timespec="seconds")
+
+
+def _dt_identity_candidates(value: datetime | None) -> set[str]:
+    """Ключи момента для БД, которые могут терять смещение часового пояса.
+
+    PostgreSQL возвращает ``timestamptz`` в UTC, а SQLite в тестах сохраняет
+    локальные цифры времени без смещения. Для входной даты Bitrix учитываем обе
+    записи одного момента; в PostgreSQL основной ключ по-прежнему UTC.
+    """
+    if value is None:
+        return {""}
+    candidates = {_dt_identity(value)}
+    if value.tzinfo is not None:
+        candidates.add(value.replace(tzinfo=None).isoformat(timespec="seconds"))
+    return candidates
+
+
+async def _sync_crm_timeline(
+    session: AsyncSession,
+    *,
+    source_key: str,
+    adapter,
+    deal_ids: list[str],
+    stage_names: dict[str, str],
+    modified_after: str | None = None,
+    commit: bool = True,
+) -> dict[str, int | str]:
+    """Идемпотентно синхронизирует историю стадий, звонки и встречи портала.
+
+    История и активности независимы: отсутствие права на один REST-метод не
+    уничтожает уже загруженные факты и не мешает обновить второй источник.
+    """
+    wanted = sorted({str(item) for item in deal_ids if item})
+    if not wanted:
+        return {"history_created": 0, "activities_created": 0, "activities_updated": 0}
+    deals = list((await session.execute(
+        select(Deal).where(
+            Deal.crm_source == source_key,
+            Deal.entity_type == "deal",
+            Deal.external_id.in_(wanted),
+        )
+    )).scalars().all())
+    by_external = {str(deal.external_id): deal for deal in deals if deal.external_id}
+    result: dict[str, int | str] = {
+        "history_created": 0,
+        "activities_created": 0,
+        "activities_updated": 0,
+    }
+
+    try:
+        history_rows = adapter.fetch_stage_history(wanted)
+        existing_history = list((await session.execute(
+            select(StageHistory).where(
+                StageHistory.deal_id.in_([deal.id for deal in deals])
+            )
+        )).scalars().all()) if deals else []
+        history_keys = {
+            (row.deal_id, row.to_stage, identity)
+            for row in existing_history
+            for identity in _dt_identity_candidates(row.changed_at)
+        }
+        grouped: dict[str, list[tuple[datetime | None, str]]] = {}
+        for raw in history_rows:
+            external_id = str(raw.get("deal_external_id") or "")
+            if external_id not in by_external:
+                continue
+            stage_id = str(raw.get("stage_id") or "")
+            if not stage_id:
+                continue
+            grouped.setdefault(external_id, []).append(
+                (_parse_dt(raw.get("changed_at")), stage_id)
+            )
+        for external_id, entries in grouped.items():
+            deal = by_external[external_id]
+            entries.sort(key=lambda item: item[0] or datetime.min.replace(tzinfo=UTC))
+            previous: str | None = None
+            for changed_at, stage_id in entries:
+                to_stage = (stage_names.get(stage_id) or stage_id)[:64]
+                from_stage = (
+                    (stage_names.get(previous) or previous)[:64] if previous else None
+                )
+                keys = {
+                    (deal.id, to_stage, identity)
+                    for identity in _dt_identity_candidates(changed_at)
+                }
+                if history_keys.isdisjoint(keys):
+                    session.add(StageHistory(
+                        deal_id=deal.id,
+                        from_stage=from_stage,
+                        to_stage=to_stage,
+                        changed_at=changed_at,
+                    ))
+                    history_keys.update(keys)
+                    result["history_created"] = int(result["history_created"]) + 1
+                previous = stage_id
+            if entries:
+                deal.stage_entered_at = entries[-1][0]
+    except Exception as exc:  # noqa: BLE001 — права истории не блокируют сделки
+        logger.warning("Bitrix24 (%s): история стадий недоступна: %s", source_key, exc)
+        result["history_error"] = str(exc)
+
+    try:
+        activity_rows = adapter.fetch_activities(wanted, modified_after=modified_after)
+        existing_activities = {
+            (row.deal_id, row.external_id): row
+            for row in (await session.execute(
+                select(CrmActivity).where(
+                    CrmActivity.deal_id.in_([deal.id for deal in deals])
+                )
+            )).scalars().all()
+        } if deals else {}
+        for raw in activity_rows:
+            deal = by_external.get(str(raw.get("deal_external_id") or ""))
+            external_id = str(raw.get("external_id") or "")
+            if deal is None or not external_id:
+                continue
+            values = {
+                "kind": str(raw.get("kind") or "")[:16],
+                "subject": str(raw.get("subject") or "")[:255],
+                "responsible_id": str(raw.get("responsible_id") or "")[:32],
+                "occurred_at": _parse_dt(raw.get("occurred_at")),
+                "ended_at": _parse_dt(raw.get("ended_at")),
+                "duration_sec": max(0, int(raw.get("duration_sec") or 0)),
+                "completed": bool(raw.get("completed")),
+                "direction": str(raw.get("direction") or "")[:16],
+                "provider_id": str(raw.get("provider_id") or "")[:64],
+            }
+            current = existing_activities.get((deal.id, external_id))
+            if current is None:
+                current = CrmActivity(
+                    deal_id=deal.id, external_id=external_id[:64], **values
+                )
+                session.add(current)
+                existing_activities[(deal.id, external_id)] = current
+                result["activities_created"] = int(result["activities_created"]) + 1
+            else:
+                for field, value in values.items():
+                    setattr(current, field, value)
+                result["activities_updated"] = int(result["activities_updated"]) + 1
+        await session.flush()
+        deal_db_ids = {deal.id for deal in deals}
+        if deal_db_ids:
+            contact_rows = list((await session.execute(
+                select(CrmActivity).where(
+                    CrmActivity.deal_id.in_(deal_db_ids),
+                    CrmActivity.kind.in_(["call", "meeting"]),
+                    CrmActivity.occurred_at.is_not(None),
+                )
+            )).scalars().all())
+            contacts: dict[int, list[CrmActivity]] = {}
+            for row in contact_rows:
+                contacts.setdefault(row.deal_id, []).append(row)
+            for deal in deals:
+                rows = contacts.get(deal.id, [])
+                times = sorted(
+                    (row.occurred_at for row in rows if row.occurred_at),
+                    key=lambda value: value.replace(tzinfo=None),
+                )
+                if not times:
+                    deal.first_contact_at = None
+                    deal.last_activity_at = None
+                    deal.first_contact = "—"
+                    deal.call = False
+                    continue
+                deal.first_contact_at = times[0]
+                deal.last_activity_at = times[-1]
+                deal.call = any(row.kind == "call" for row in rows)
+                if deal.created_at:
+                    minutes = max(0, round((times[0] - deal.created_at).total_seconds() / 60))
+                    deal.first_contact = f"{minutes} мин"
+    except Exception as exc:  # noqa: BLE001 — права активностей не блокируют сделки
+        logger.warning("Bitrix24 (%s): звонки/встречи недоступны: %s", source_key, exc)
+        result["activities_error"] = str(exc)
+
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
+    return result
+
+
 async def _bitrix_dictionaries(
     deals: list[dict], progress: Progress | None = None, adapter=None,
     manual_users: dict[str, str] | None = None,
@@ -537,6 +730,45 @@ async def _bitrix_dictionaries(
     return users, stages, sources, phones
 
 
+async def refresh_crm_timelines(session: AsyncSession, *, full: bool = False) -> dict:
+    """Обновляет историю/контакты уже сохранённых сделок без тяжёлой выгрузки CRM.
+
+    Используется для первоначального backfill и диагностики. Обычная быстрая
+    сверка вызывает тот же механизм только для изменённых сделок.
+    """
+    if settings.data_source != "real":
+        return {"skipped": True, "reason": "демо-режим", "sources": {}}
+    connections = factory.get_bitrix24_connections()
+    if not connections:
+        return {"skipped": True, "reason": "Битрикс24 не настроен", "sources": {}}
+    since = None if full else (
+        datetime.now(UTC) - timedelta(minutes=_SYNC_OVERLAP_MINUTES)
+    ).isoformat(timespec="seconds")
+    output: dict[str, dict[str, int | str]] = {}
+    for source_key, adapter in connections:
+        ids = list((await session.execute(
+            select(Deal.external_id).where(
+                Deal.crm_source == source_key,
+                Deal.entity_type == "deal",
+                Deal.external_id.is_not(None),
+            )
+        )).scalars().all())
+        try:
+            stage_names = {row["id"]: row["name"] for row in adapter.fetch_stages()}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Bitrix24 (%s): справочник стадий недоступен: %s", source_key, exc)
+            stage_names = {}
+        output[source_key] = await _sync_crm_timeline(
+            session,
+            source_key=source_key,
+            adapter=adapter,
+            deal_ids=[str(item) for item in ids if item],
+            stage_names=stage_names,
+            modified_after=since,
+        )
+    return {"skipped": False, "full": full, "sources": output}
+
+
 async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     """Синхронизирует сделки из Битрикс24 без выгрузки рекламных источников.
 
@@ -560,7 +792,9 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
 
     now = datetime.now(UTC)
     business_config = await business.get_settings(session)
-    batches: list[tuple[str, list[dict], tuple[dict, dict, dict, dict], set[str]]] = []
+    batches: list[
+        tuple[str, list[dict], tuple[dict, dict, dict, dict], set[str], object]
+    ] = []
     for source_key, adapter in connections:
         if full:
             window = (now - timedelta(days=_DEALS_WINDOW_DAYS)).strftime(
@@ -579,7 +813,9 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
             adapter=adapter,
             manual_users=business.employee_names_for_source(business_config, source_key),
         )
-        batches.append((source_key, raw, dictionaries, _open_action_ids(raw, adapter)))
+        batches.append(
+            (source_key, raw, dictionaries, _open_action_ids(raw, adapter), adapter)
+        )
 
     existing = {
         (d.crm_source, d.entity_type, d.external_id): d
@@ -594,7 +830,7 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     next_position = max((d.position for d in existing.values()), default=-1) + 1
     position = 0
     seen: set[tuple[str, str, str]] = set()
-    for source_key, raw, dictionaries, action_ids in batches:
+    for source_key, raw, dictionaries, action_ids, _adapter in batches:
         users, stages, sources_map, phones = dictionaries
         for nd in raw:
             entity_key = business.legal_entity_for_funnel(
@@ -642,13 +878,23 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     # трогает только изменённые сделки, поэтому старые коды («call», «cpc») чиним
     # отдельным идемпотентным проходом по всей таблице.
     normalized = await src_svc.normalize_existing(session)
+    timeline: dict[str, dict[str, int | str]] = {}
+    for source_key, raw, dictionaries, _action_ids, adapter in batches:
+        timeline[source_key] = await _sync_crm_timeline(
+            session,
+            source_key=source_key,
+            adapter=adapter,
+            deal_ids=[str(row.get("external_id") or "") for row in raw],
+            stage_names=dictionaries[1],
+            modified_after=None if full else since,
+        )
     logger.info(
         "Сверка сделок Битрикс24: создано=%d обновлено=%d удалено=%d источники=%d (full=%s)",
         created, updated, removed, normalized, full,
     )
     return {
         "skipped": False, "created": created, "updated": updated,
-        "removed": removed, "full": full,
+        "removed": removed, "full": full, "timeline": timeline,
     }
 
 
@@ -836,6 +1082,32 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
         deal_rows.append(deal)
         session.add(deal)
     await session.flush()
+
+    # История стадий и контакты загружаются после сделок: локальный deal_id уже
+    # известен и факты можно безопасно связать даже при совпадающих ID порталов.
+    for source_key, adapter in connections:
+        source_deal_ids = [
+            str(row.get("external_id") or "")
+            for row in deals
+            if str(row.get("crm_source") or "primary") == source_key
+        ]
+        context = bitrix_context.get(source_key, ({}, {}, {}, {}, set()))
+        timeline_result = await _sync_crm_timeline(
+            session,
+            source_key=source_key,
+            adapter=adapter,
+            deal_ids=source_deal_ids,
+            stage_names=context[1],
+            commit=False,
+        )
+        sources[f"bitrix_{source_key}_timeline"] = {
+            "status": "error"
+            if "history_error" in timeline_result and "activities_error" in timeline_result
+            else "partial"
+            if "history_error" in timeline_result or "activities_error" in timeline_result
+            else "ok",
+            **timeline_result,
+        }
 
     by_external_id: dict[str, list[Deal]] = {}
     for deal in deal_rows:
