@@ -12,16 +12,18 @@ import pathlib
 import tempfile
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 import app.models  # noqa: F401 — регистрирует таблицы
 from app.core.config import settings
 from app.core.db import Base
-from app.models import AdCost, Deal, ManualExpense, Visit
+from app.models import AdCost, Deal, ManualExpense, OneCReceipt, StageHistory, Visit
 from app.services import analytics, metrics
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_period_test.db"
@@ -160,6 +162,47 @@ def test_kpis_follow_period_and_filters() -> None:
         # Рекламные показатели не разрезаются менеджером — расход относится к
         # кампании, а не к ответственному.
         assert by_mgr["spend"] == month["spend"]
+
+    with_real_data(check)
+
+
+def test_expected_averages_and_deal_cycle_are_real() -> None:
+    """Новые KPI считаются из стадий Bitrix, истории и поступлений 1С."""
+    async def check(s: AsyncSession) -> None:
+        deals = (await s.execute(select(Deal).order_by(Deal.position))).scalars().all()
+        expected = _deal(
+            5, days_ago=2, mgr="Иванов", src="Сайт", amount=500_000, won=False
+        )
+        expected.stage = "Заключение Контракта"
+        expected.status_label = expected.stage
+        s.add(expected)
+        for deal in deals[:3]:
+            s.add(StageHistory(
+                deal_id=deal.id, from_stage="В работе", to_stage=deal.stage or "Оплачено",
+                changed_at=deal.created_at + timedelta(days=2),
+            ))
+        s.add_all([
+            OneCReceipt(
+                external_key="receipt-1", registrar_date=NOW, amount=Decimal("90000"),
+                matched_deal_id=deals[0].id,
+            ),
+            OneCReceipt(
+                external_key="receipt-2", registrar_date=NOW, amount=Decimal("110000"),
+                matched_deal_id=deals[1].id,
+            ),
+        ])
+        await s.commit()
+        previous = settings.onec_endpoint
+        settings.onec_endpoint = "https://1c.example/receipts"
+        try:
+            cards = {item["key"]: item for item in await metrics.kpis(s, "30")}
+        finally:
+            settings.onec_endpoint = previous
+
+        assert cards["expected_payments"]["value"] == 500_000
+        assert cards["average_contract"]["value"] == 200_000
+        assert cards["average_receipt"]["value"] == 100_000
+        assert cards["deal_cycle"]["value"] == 2
 
     with_real_data(check)
 

@@ -27,6 +27,7 @@ export interface Funnel {
   crm_source: string;
   legal_entity_key: string;
   sla_profile_key: string;
+  expected_payment_stages: string[];
   enabled: boolean;
 }
 export interface Department { key: string; name: string; enabled: boolean }

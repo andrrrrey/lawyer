@@ -108,6 +108,7 @@ export default function BusinessSettingsPage() {
       crm_source: sourceKey,
       legal_entity_key: next.legal_entities[0]?.key ?? "",
       sla_profile_key: next.sla_profiles[0]?.key ?? "default",
+      expected_payment_stages: ["Заключение Контракта"],
       enabled: true,
     } satisfies Funnel);
   });
@@ -205,6 +206,18 @@ export default function BusinessSettingsPage() {
                         options={slaOptions}
                         value={selected?.sla_profile_key}
                         onChange={(value) => updateFunnel(source.key, option.id, "sla_profile_key", value)}
+                      />
+                      <Input
+                        style={{ minWidth: 260, flex: 1 }}
+                        placeholder="Стадии ожидания оплаты через запятую"
+                        value={(selected?.expected_payment_stages ?? ["Заключение Контракта"]).join(", ")}
+                        onChange={(event) => mutate((next) => {
+                          const item = next.funnels.find(
+                            (row) => row.crm_source === source.key && row.external_id === option.id,
+                          );
+                          if (item) item.expected_payment_stages = event.target.value
+                            .split(",").map((value) => value.trim()).filter(Boolean);
+                        })}
                       />
                     </div>
                   );

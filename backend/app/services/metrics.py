@@ -17,6 +17,7 @@ from app.models import (
     ManagerControl,
     ManualExpense,
     OneCReceipt,
+    StageHistory,
     Visit,
 )
 from app.services import format as f
@@ -287,6 +288,122 @@ def _minutes(value: float) -> str:
     return f"{text} мин"
 
 
+async def _business_kpi_cards(
+    session: AsyncSession,
+    period: str,
+    mgr: str,
+    source: str,
+    legal_entity: str,
+    funnel: str,
+) -> list[dict]:
+    """Ожидания оплат, две средние суммы и фактический цикл сделки."""
+    rows = await period_deals(session, period, mgr, source, legal_entity, funnel)
+    from app.services import business_settings
+
+    config = await business_settings.get_settings(session)
+    expected_by_funnel = {
+        (str(item.get("crm_source")), str(item.get("external_id"))): {
+            str(stage).strip().casefold()
+            for stage in item.get("expected_payment_stages", ["Заключение Контракта"])
+            if str(stage).strip()
+        }
+        for item in config.get("funnels", [])
+    }
+    expected = []
+    for deal in rows:
+        stages = expected_by_funnel.get(
+            (deal.crm_source, deal.funnel_id), {"заключение контракта"}
+        )
+        if str(deal.stage or "").strip().casefold() in stages:
+            expected.append(deal)
+
+    won = [deal for deal in rows if deal.status_class == "st-ok" and deal.amount]
+    average_contract = (
+        sum(int(deal.amount or 0) for deal in won) / len(won) if won else 0
+    )
+
+    now = datetime.now(UTC)
+    receipt_stmt = select(OneCReceipt).where(
+        OneCReceipt.excluded.is_(False),
+        OneCReceipt.registrar_date.is_not(None),
+        OneCReceipt.registrar_date >= _period_start(period, now),
+    )
+    end = _period_end(period, now)
+    if end is not None:
+        receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
+    if legal_entity and legal_entity != "all":
+        receipt_stmt = receipt_stmt.where(OneCReceipt.legal_entity_key == legal_entity)
+    if ((mgr and mgr != "all") or (source and source != "all")
+            or (funnel and funnel != "all")):
+        receipt_stmt = receipt_stmt.join(Deal, OneCReceipt.matched_deal_id == Deal.id)
+        receipt_stmt = _by_deal_filters(
+            receipt_stmt, mgr, source, legal_entity, funnel
+        )
+    receipts = (await session.execute(receipt_stmt)).scalars().all()
+    average_receipt = (
+        sum(float(item.amount or 0) for item in receipts) / len(receipts)
+        if receipts else 0
+    )
+
+    won_by_id = {deal.id: deal for deal in won if deal.created_at}
+    history_rows = []
+    if won_by_id:
+        history_rows = list((await session.execute(
+            select(StageHistory).where(StageHistory.deal_id.in_(won_by_id))
+        )).scalars().all())
+    closed_at: dict[int, datetime] = {}
+    for item in history_rows:
+        deal = won_by_id.get(item.deal_id)
+        if (
+            deal is not None
+            and item.changed_at is not None
+            and item.to_stage == deal.stage
+            and (item.deal_id not in closed_at or item.changed_at < closed_at[item.deal_id])
+        ):
+            closed_at[item.deal_id] = item.changed_at
+    cycle_values = [
+        max(0.0, (closed_at[deal_id] - deal.created_at).total_seconds() / 86_400)
+        for deal_id, deal in won_by_id.items()
+        if deal_id in closed_at and deal.created_at is not None
+    ]
+    average_cycle = sum(cycle_values) / len(cycle_values) if cycle_values else 0
+
+    common = {
+        "trend": "flat", "spark": [], "drill": None,
+        "period_label": per.label(period),
+    }
+    return [
+        {
+            **common, "key": "expected_payments", "label": "Ожидаемые оплаты",
+            "icon": "i-amber", "svg": '<path d="M4 12h16M12 4v16"/>',
+            "kind": "money", "value": float(sum(int(d.amount or 0) for d in expected)),
+            "display": f.money_short(sum(int(d.amount or 0) for d in expected)),
+            "delta": f"{len(expected)} сделок",
+        },
+        {
+            **common, "key": "average_contract", "label": "Средняя сумма договора",
+            "icon": "i-cyan", "svg": '<path d="M5 4h14v16H5zM8 9h8M8 13h8"/>',
+            "kind": "money", "value": average_contract,
+            "display": f.money_short(average_contract) if average_contract else "—",
+            "delta": f"{len(won)} продаж",
+        },
+        {
+            **common, "key": "average_receipt", "label": "Средняя сумма поступления",
+            "icon": "i-green", "svg": '<path d="M4 7h16v12H4zM8 4h8M8 13h8"/>',
+            "kind": "money", "value": average_receipt,
+            "display": f.money_short(average_receipt) if average_receipt else "—",
+            "delta": f"{len(receipts)} поступлений",
+        },
+        {
+            **common, "key": "deal_cycle", "label": "Средний цикл сделки",
+            "icon": "i-indigo", "svg": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+            "kind": "days", "value": average_cycle,
+            "display": f"{average_cycle:.1f} дн".replace(".", ",") if cycle_values else "—",
+            "delta": f"{len(cycle_values)} сделок",
+        },
+    ]
+
+
 async def kpis(
     session: AsyncSession,
     period: str,
@@ -340,6 +457,12 @@ async def kpis(
             "spark": [] if real else c.spark,
             "drill": c.drill, "period_label": per.label(period),
         })
+    if real:
+        out.extend(
+            await _business_kpi_cards(
+                session, period, mgr, source, legal_entity, funnel
+            )
+        )
     return out
 
 

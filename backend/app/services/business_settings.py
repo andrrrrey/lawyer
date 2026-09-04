@@ -87,6 +87,12 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
         profile = str(funnel.get("sla_profile_key", "default"))
         if profile not in profile_keys:
             raise ValueError("Воронка ссылается на неизвестный профиль SLA")
+        expected = funnel.get("expected_payment_stages", ["Заключение Контракта"])
+        if not isinstance(expected, list):
+            raise ValueError("Стадии ожидания оплаты должны быть списком")
+        funnel["expected_payment_stages"] = [
+            str(item).strip()[:128] for item in expected if str(item).strip()
+        ]
 
     for employee in employees:
         crm_source = str(employee.get("crm_source", "")).strip()
