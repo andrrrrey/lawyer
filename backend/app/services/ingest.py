@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -730,6 +730,27 @@ async def _bitrix_dictionaries(
     return users, stages, sources, phones
 
 
+async def _refresh_saved_manager_names(
+    session: AsyncSession, source_key: str, users: dict[str, str]
+) -> int:
+    """Обновляет ФИО и у ранее загруженных сделок после появления прав user.get."""
+    changed = 0
+    for user_id, name in users.items():
+        if not user_id or not name:
+            continue
+        result = await session.execute(
+            update(Deal)
+            .where(
+                Deal.crm_source == source_key,
+                Deal.mgr_id == user_id,
+                Deal.mgr != name,
+            )
+            .values(mgr=name)
+        )
+        changed += int(result.rowcount or 0)
+    return changed
+
+
 async def refresh_crm_timelines(session: AsyncSession, *, full: bool = False) -> dict:
     """Обновляет историю/контакты уже сохранённых сделок без тяжёлой выгрузки CRM.
 
@@ -813,6 +834,7 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
             adapter=adapter,
             manual_users=business.employee_names_for_source(business_config, source_key),
         )
+        await _refresh_saved_manager_names(session, source_key, dictionaries[0])
         batches.append(
             (source_key, raw, dictionaries, _open_action_ids(raw, adapter), adapter)
         )

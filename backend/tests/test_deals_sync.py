@@ -11,6 +11,7 @@ import asyncio
 import pathlib
 import tempfile
 from collections.abc import Callable, Coroutine
+from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
@@ -23,7 +24,8 @@ from app.core.config import settings
 from app.core.db import Base
 from app.integrations import factory
 from app.models import CrmActivity, Deal, StageHistory, Task
-from app.services import ingest
+from app.seeds.business import BUSINESS_SETTINGS
+from app.services import business_settings, ingest
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_sync_test.db"
 
@@ -79,6 +81,7 @@ class FakeBitrix:
 
     def __init__(self, deals: list[dict]) -> None:
         self.deals = deals
+        self.users = [{"id": "12", "name": "Михаил Иванов"}]
         self.history: list[dict] = []
         self.activities: list[dict] = []
         self.stages = [
@@ -92,7 +95,7 @@ class FakeBitrix:
         return [dict(d) for d in self.deals]
 
     def fetch_users(self):
-        return [{"id": "12", "name": "Михаил Иванов"}]
+        return [dict(row) for row in self.users]
 
     def fetch_stages(self):
         return [dict(row) for row in self.stages]
@@ -230,6 +233,57 @@ def test_sync_resolves_dictionaries(monkeypatch) -> None:
         assert deal.mgr == "Михаил Иванов"
         assert deal.mgr_id == "12"
         assert deal.src == "Сайт"
+
+    with_db(check)
+
+
+def test_quick_sync_repairs_names_on_deals_outside_changed_batch(monkeypatch) -> None:
+    """После выдачи user_brief ФИО чинятся у всех сделок, не только изменённых."""
+    async def check(s: AsyncSession) -> None:
+        portal = FakeBitrix([_raw("100", title="Старая", mgr="12")])
+        portal.users = []
+        monkeypatch.setattr(factory, "get_bitrix24", lambda: portal)
+        await ingest.refresh_deals(s, full=True)
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.mgr == "Сотрудник #12"
+
+        # Сделка 100 не попала в короткую выборку изменённых, но справочник уже
+        # доступен: плановый sync должен обновить сохранённое имя.
+        portal.users = [{"id": "12", "name": "Михаил Иванов"}]
+        portal.deals = []
+        await ingest.refresh_deals(s)
+
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.mgr == "Михаил Иванов"
+
+    with_db(check)
+
+
+def test_business_settings_mapping_repairs_saved_manager_name(monkeypatch) -> None:
+    """Ручное соответствие ID → ФИО применяется без полного пересчёта."""
+    async def check(s: AsyncSession) -> None:
+        portal = FakeBitrix([_raw("100", title="Сделка", mgr="12")])
+        portal.users = []
+        monkeypatch.setattr(factory, "get_bitrix24", lambda: portal)
+        await ingest.refresh_deals(s, full=True)
+        deal = (await s.execute(select(Deal))).scalar_one()
+        deal.crm_source = "box"
+        await s.commit()
+
+        config = deepcopy(BUSINESS_SETTINGS)
+        config["employees"] = [{
+            "key": "box_12",
+            "name": "Михаил Иванов",
+            "crm_source": "box",
+            "bitrix_user_id": "12",
+            "legal_entity_key": "",
+            "department_key": "",
+            "enabled": True,
+        }]
+        await business_settings.save_settings(s, config)
+
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.mgr == "Михаил Иванов"
 
     with_db(check)
 

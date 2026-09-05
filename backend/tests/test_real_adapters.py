@@ -66,6 +66,23 @@ def test_bitrix_call_unwraps_stage_history_items(monkeypatch) -> None:
     ]
 
 
+def test_bitrix_call_does_not_hide_rest_errors(monkeypatch) -> None:
+    """HTTP 200 с REST-ошибкой — это ошибка, а не пустой справочник."""
+    class FakeResponse:
+        @staticmethod
+        def json() -> dict:
+            return {
+                "error": "insufficient_scope",
+                "error_description": "The request requires higher privileges",
+            }
+
+    monkeypatch.setattr(bitrix24, "request", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(bitrix24, "_base", lambda *a, **kw: "https://portal/rest/1/x")
+
+    with pytest.raises(RuntimeError, match="requires higher privileges"):
+        bitrix24._call("user.get", {})
+
+
 def test_onec_uses_post_with_iso_period_body(monkeypatch) -> None:
     calls: list[tuple[str, str, dict]] = []
 

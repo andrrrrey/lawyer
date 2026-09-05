@@ -44,6 +44,13 @@ def _call(
                 "POST", f"{base}/{method}.json", client=client, json=payload
             )
             data = resp.json()
+            # REST Битрикс24 нередко отвечает HTTP 200 даже при отказе. Раньше
+            # постраничный клиент трактовал такой конверт как пустой список —
+            # поэтому отсутствие scope user_brief незаметно превращало ФИО в
+            # «Сотрудник #123». Ошибка должна быть видна в журнале/диагностике.
+            if isinstance(data, dict) and data.get("error"):
+                msg = data.get("error_description") or data.get("error")
+                raise RuntimeError(f"Битрикс24 отклонил {method}: {msg}")
             result = data.get("result", [])
             if isinstance(result, dict):  # некоторые методы возвращают объект
                 # crm.stagehistory.list кладёт строки во вложенный result.items,

@@ -51,7 +51,7 @@ PROVIDERS: list[Provider] = [
             Field(
                 "bitrix_box_webhook_url",
                 "URL входящего вебхука",
-                "Права на чтение CRM и запись задач. Пример: "
+                "Права: CRM, задачи и пользователи (scope user_brief). Пример: "
                 "https://<portal>.bitrix24.ru/rest/1/<код>/",
                 secret=True,
                 placeholder="https://<portal>.bitrix24.ru/rest/1/<код>/",
@@ -76,7 +76,7 @@ PROVIDERS: list[Provider] = [
             Field(
                 "bitrix_cloud_webhook_url",
                 "URL входящего вебхука",
-                "Права на чтение CRM и запись задач.",
+                "Права: CRM, задачи и пользователи (scope user_brief).",
                 secret=True,
                 placeholder="https://<portal>.bitrix24.ru/rest/1/<код>/",
             ),

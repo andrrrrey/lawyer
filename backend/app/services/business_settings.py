@@ -6,10 +6,10 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import BusinessSettings
+from app.models import BusinessSettings, Deal
 from app.seeds.business import BUSINESS_SETTINGS
 
 _ARTICLE_OPERATIONS = {"income", "refund", "exclude"}
@@ -32,6 +32,19 @@ async def save_settings(session: AsyncSession, data: dict[str, Any]) -> dict[str
         session.add(row)
     else:
         row.data = normalized
+    # Ручное соответствие Bitrix ID → ФИО должно действовать сразу, а не только
+    # после тяжёлого полного пересчёта. Это также остаётся рабочим fallback для
+    # порталов, где вебхуку нельзя выдать scope user_brief.
+    for source in normalized.get("crm_sources", []):
+        source_key = str(source.get("key") or "").strip()
+        if not source_key:
+            continue
+        for user_id, name in employee_names_for_source(normalized, source_key).items():
+            await session.execute(
+                update(Deal)
+                .where(Deal.crm_source == source_key, Deal.mgr_id == user_id)
+                .values(mgr=name)
+            )
     await session.commit()
     return deepcopy(normalized)
 
