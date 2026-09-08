@@ -97,6 +97,18 @@ def _stage_class(stage: str | None, semantic: str | None) -> str:
     return "st-mid"
 
 
+def _bounded_text(value: object, limit: int, default: str = "") -> str:
+    """Строка для VARCHAR-поля: Bitrix не ограничивает длину пользовательских имён."""
+    return str(default if value is None else value)[:limit]
+
+
+def _bounded_optional_text(value: object, limit: int) -> str | None:
+    """Nullable-вариант ограничения строки без превращения None в текст ``None``."""
+    if value in (None, ""):
+        return None
+    return str(value)[:limit]
+
+
 def _deal_from_bitrix(
     position: int, nd: dict,
     users: dict[str, str] | None = None,
@@ -133,26 +145,26 @@ def _deal_from_bitrix(
     return Deal(
         position=position,
         on_dashboard=True,
-        ref=nd.get("ref", ""),
-        external_id=nd.get("external_id"),
+        ref=_bounded_text(nd.get("ref"), 48),
+        external_id=_bounded_optional_text(nd.get("external_id"), 48),
         crm_source=str(nd.get("crm_source") or "primary")[:32],
         entity_type=str(nd.get("entity_type") or "deal")[:16],
         legal_entity_key=legal_entity_key[:32],
         funnel_id=str(nd.get("funnel_id") or "0")[:48],
         funnel_name=str(nd.get("funnel_name") or "")[:128],
-        name=nd.get("name") or "Без названия",
-        src=src,
-        campaign=nd.get("campaign"),
-        utm=nd.get("utm"),
-        mgr=mgr,
-        mgr_id=mgr_id or None,
-        phone=phone,
-        client_type=custom.get("client_type") or None,
-        refuse_reason=custom.get("refuse_reason") or "",
+        name=_bounded_text(nd.get("name") or "Без названия", 255),
+        src=_bounded_text(src, 64, "—"),
+        campaign=_bounded_optional_text(nd.get("campaign"), 128),
+        utm=_bounded_optional_text(nd.get("utm"), 255),
+        mgr=_bounded_text(mgr, 128, "—"),
+        mgr_id=_bounded_optional_text(mgr_id, 32),
+        phone=_bounded_optional_text(phone, 64),
+        client_type=_bounded_optional_text(custom.get("client_type"), 64),
+        refuse_reason=_bounded_text(custom.get("refuse_reason"), 255),
         custom=custom or None,
-        status_label=str(stage or "—"),
-        status_class=_stage_class(stage, semantic),
-        stage=stage,
+        status_label=_bounded_text(stage or "—", 64),
+        status_class=_bounded_text(_stage_class(stage, semantic), 32),
+        stage=_bounded_optional_text(stage, 64),
         amount=int(nd.get("amount") or 0),
         first_contact="—",
         created_at=_parse_dt(nd.get("created")),

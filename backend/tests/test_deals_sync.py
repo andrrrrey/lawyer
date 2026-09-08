@@ -237,6 +237,33 @@ def test_sync_resolves_dictionaries(monkeypatch) -> None:
     with_db(check)
 
 
+def test_deal_normalization_bounds_all_varchar_fields() -> None:
+    """Длинные пользовательские значения Bitrix не роняют пакетный INSERT."""
+    long = "Очень длинное значение " * 30
+    raw = _raw("1" * 80, title=long, stage="LONG", mgr="2" * 50)
+    raw.update({
+        "ref": long,
+        "src": "LONG_SOURCE",
+        "campaign": long,
+        "utm": long,
+        "custom": {"client_type": long, "refuse_reason": long},
+    })
+    deal = ingest._deal_from_bitrix(
+        0,
+        raw,
+        users={"2" * 50: long},
+        stages={"LONG": long},
+        sources={"LONG_SOURCE": long},
+        phones={},
+    )
+
+    for column in Deal.__table__.columns:
+        limit = getattr(column.type, "length", None)
+        value = getattr(deal, column.name, None)
+        if limit and value is not None:
+            assert len(str(value)) <= limit, column.name
+
+
 def test_quick_sync_repairs_names_on_deals_outside_changed_batch(monkeypatch) -> None:
     """После выдачи user_brief ФИО чинятся у всех сделок, не только изменённых."""
     async def check(s: AsyncSession) -> None:
