@@ -27,7 +27,11 @@ export interface Funnel {
   crm_source: string;
   legal_entity_key: string;
   sla_profile_key: string;
+  entity_type: "deal" | "lead";
+  qualification_stages: string[];
   expected_payment_stages: string[];
+  successful_stages: string[];
+  stage_order: string[];
   enabled: boolean;
 }
 export interface Department { key: string; name: string; enabled: boolean }
@@ -87,6 +91,16 @@ export interface BitrixFunnelOption {
   name: string;
   is_default: boolean;
   sort: number;
+  entity_type: "deal" | "lead";
+  stages: BitrixStageOption[];
+}
+
+export interface BitrixStageOption {
+  id: string;
+  name: string;
+  funnel_id: string;
+  sort: number;
+  semantic: string;
 }
 
 export interface BitrixFunnelSource {

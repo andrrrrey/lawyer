@@ -6,7 +6,7 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BusinessSettings, Deal
@@ -15,6 +15,12 @@ from app.seeds.business import BUSINESS_SETTINGS
 _ARTICLE_OPERATIONS = {"income", "refund", "exclude"}
 _PLAN_SCOPES = {"company", "department", "employee"}
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+_FUNNEL_STAGE_FIELDS = (
+    "qualification_stages",
+    "expected_payment_stages",
+    "successful_stages",
+    "stage_order",
+)
 
 
 async def get_settings(session: AsyncSession) -> dict[str, Any]:
@@ -100,12 +106,17 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
         profile = str(funnel.get("sla_profile_key", "default"))
         if profile not in profile_keys:
             raise ValueError("Воронка ссылается на неизвестный профиль SLA")
-        expected = funnel.get("expected_payment_stages", ["Заключение Контракта"])
-        if not isinstance(expected, list):
-            raise ValueError("Стадии ожидания оплаты должны быть списком")
-        funnel["expected_payment_stages"] = [
-            str(item).strip()[:128] for item in expected if str(item).strip()
-        ]
+        for field in _FUNNEL_STAGE_FIELDS:
+            stages = funnel.get(field, [])
+            if not isinstance(stages, list):
+                raise ValueError("Настроенные стадии воронки должны быть списком")
+            funnel[field] = list(dict.fromkeys(
+                str(item).strip()[:128] for item in stages if str(item).strip()
+            ))
+        entity_type = str(funnel.get("entity_type") or "deal").strip()
+        if entity_type not in {"deal", "lead"}:
+            raise ValueError("Тип воронки должен быть deal или lead")
+        funnel["entity_type"] = entity_type
 
     for employee in employees:
         crm_source = str(employee.get("crm_source", "")).strip()
@@ -150,8 +161,38 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("Показатели плана не могут быть отрицательными")
             plan[metric] = value
 
-    result["schema_version"] = 1
+    result["schema_version"] = 2
     return result
+
+
+def configured_funnel_pairs(data: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Включённые в дашборд пары ``портал × тип × ID воронки``."""
+    return [
+        (
+            str(item.get("crm_source") or ""),
+            str(item.get("entity_type") or "deal"),
+            str(item.get("external_id") or ""),
+        )
+        for item in data.get("funnels", [])
+        if item.get("enabled", True)
+        and item.get("crm_source") is not None
+        and item.get("external_id") is not None
+    ]
+
+
+def configured_funnel_condition(data: dict[str, Any]):
+    """SQL-условие выбранных в настройках воронок; ``None`` до первой настройки."""
+    pairs = configured_funnel_pairs(data)
+    if not pairs:
+        return None
+    return or_(*[
+        and_(
+            Deal.crm_source == source,
+            Deal.entity_type == entity_type,
+            Deal.funnel_id == funnel_id,
+        )
+        for source, entity_type, funnel_id in pairs
+    ])
 
 
 def employee_names_for_source(data: dict[str, Any], crm_source: str) -> dict[str, str]:
@@ -196,6 +237,27 @@ def funnel_name(data: dict[str, Any], crm_source: str, funnel_id: str) -> str:
         ):
             return str(funnel.get("name") or "")
     return ""
+
+
+def stage_is_expected_payment(
+    data: dict[str, Any], crm_source: str, funnel_id: str, stage: str | None
+) -> bool:
+    """Текущая стадия входит в настроенный список ожидания оплаты."""
+    needle = str(stage or "").strip().casefold()
+    if not needle:
+        return False
+    for funnel in data.get("funnels", []):
+        if (
+            funnel.get("enabled", True)
+            and str(funnel.get("crm_source")) == crm_source
+            and str(funnel.get("external_id")) == str(funnel_id)
+        ):
+            return needle in {
+                str(item).strip().casefold()
+                for item in funnel.get("expected_payment_stages", [])
+                if str(item).strip()
+            }
+    return False
 
 
 def sla_profile_for_funnel(

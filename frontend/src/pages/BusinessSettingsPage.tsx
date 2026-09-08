@@ -109,7 +109,13 @@ export default function BusinessSettingsPage() {
       crm_source: sourceKey,
       legal_entity_key: next.legal_entities[0]?.key ?? "",
       sla_profile_key: next.sla_profiles[0]?.key ?? "default",
-      expected_payment_stages: ["Заключение Контракта"],
+      entity_type: funnel.entity_type ?? "deal",
+      qualification_stages: [],
+      expected_payment_stages: [],
+      successful_stages: funnel.stages
+        .filter((stage) => stage.semantic.toUpperCase() === "S")
+        .map((stage) => stage.name),
+      stage_order: funnel.stages.map((stage) => stage.name),
       enabled: true,
     } satisfies Funnel);
   });
@@ -166,7 +172,14 @@ export default function BusinessSettingsPage() {
             const discoveredIds = new Set(source.funnels.map((item) => item.id));
             const savedOnly: BitrixFunnelOption[] = draft.funnels
               .filter((item) => item.crm_source === source.key && !discoveredIds.has(item.external_id))
-              .map((item) => ({ id: item.external_id, name: item.name, is_default: false, sort: 0 }));
+              .map((item) => ({
+                id: item.external_id, name: item.name, is_default: false, sort: 0,
+                entity_type: item.entity_type ?? "deal",
+                stages: (item.stage_order ?? []).map((name, index) => ({
+                  id: name, name, funnel_id: item.external_id, sort: index * 10,
+                  semantic: "",
+                })),
+              }));
             const options = [...source.funnels, ...savedOnly];
             return (
               <div key={source.key} style={{ borderTop: "1px solid var(--line2)", paddingTop: 14, marginTop: 14 }}>
@@ -211,18 +224,56 @@ export default function BusinessSettingsPage() {
                         value={selected?.sla_profile_key}
                         onChange={(value) => updateFunnel(source.key, option.id, "sla_profile_key", value)}
                       />
-                      <Input
-                        style={{ minWidth: 260, flex: 1 }}
-                        placeholder="Стадии ожидания оплаты через запятую"
-                        value={(selected?.expected_payment_stages ?? ["Заключение Контракта"]).join(", ")}
-                        onChange={(event) => mutate((next) => {
+                      <div style={{ minWidth: 360, flex: 1, display: "grid", gap: 8 }}>
+                        <Select
+                          mode="multiple"
+                          placeholder="Стадии квалификации"
+                          disabled={!selected?.enabled}
+                          options={option.stages.map((stage) => ({ value: stage.name, label: stage.name }))}
+                          value={selected?.qualification_stages ?? []}
+                          onChange={(values) => mutate((next) => {
+                            const item = next.funnels.find(
+                              (row) => row.crm_source === source.key && row.external_id === option.id,
+                            );
+                            if (item) {
+                              item.qualification_stages = values;
+                              item.stage_order = option.stages.map((stage) => stage.name);
+                            }
+                          })}
+                        />
+                        <Select
+                          mode="multiple"
+                          placeholder="Стадии ожидания оплаты"
+                          disabled={!selected?.enabled}
+                          options={option.stages.map((stage) => ({ value: stage.name, label: stage.name }))}
+                          value={selected?.expected_payment_stages ?? []}
+                          onChange={(values) => mutate((next) => {
                           const item = next.funnels.find(
                             (row) => row.crm_source === source.key && row.external_id === option.id,
                           );
-                          if (item) item.expected_payment_stages = event.target.value
-                            .split(",").map((value) => value.trim()).filter(Boolean);
-                        })}
-                      />
+                            if (item) {
+                              item.expected_payment_stages = values;
+                              item.stage_order = option.stages.map((stage) => stage.name);
+                            }
+                          })}
+                        />
+                        <Select
+                          mode="multiple"
+                          placeholder="Успешные стадии"
+                          disabled={!selected?.enabled}
+                          options={option.stages.map((stage) => ({ value: stage.name, label: stage.name }))}
+                          value={selected?.successful_stages ?? []}
+                          onChange={(values) => mutate((next) => {
+                            const item = next.funnels.find(
+                              (row) => row.crm_source === source.key && row.external_id === option.id,
+                            );
+                            if (item) {
+                              item.successful_stages = values;
+                              item.stage_order = option.stages.map((stage) => stage.name);
+                            }
+                          })}
+                        />
+                      </div>
                     </div>
                   );
                 })}

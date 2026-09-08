@@ -14,7 +14,7 @@ export function ManagersTable({ rows }: { rows: Manager[] }) {
           <thead>
             <tr>
               <th>Менеджер</th><th>В работе</th><th>Просрочки</th><th>Без задач</th>
-              <th>Ср. контакт</th><th>Счета</th><th>Оплаты</th><th>Сумма оплат</th><th>Зона</th>
+              <th>Ср. контакт</th><th>Ожидают оплату</th><th>Оплаченные сделки</th><th>Сумма оплат</th><th>Зона</th>
             </tr>
           </thead>
           <tbody>

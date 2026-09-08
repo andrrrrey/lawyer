@@ -44,7 +44,7 @@ export function LeadsTable({ rows }: { rows: Lead[] }) {
           <thead>
             <tr>
               <th className="cell-client">Клиент</th><th>Приоритет</th><th>Источник</th><th>Менеджер</th><th>Статус</th>
-              <th>1-й контакт</th><th>Звонок</th><th>Счёт</th><th>Оплата</th><th>Сумма</th><th>Комментарий AI</th>
+              <th>1-й контакт</th><th>Звонок</th><th>Ожидает оплату</th><th>Оплачено</th><th>Сумма</th><th>Комментарий AI</th>
             </tr>
           </thead>
           <tbody>

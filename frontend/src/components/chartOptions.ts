@@ -29,6 +29,7 @@ export function funnelOption(stages: FunnelStage[]): EChartsOption {
     tooltip: { trigger: "item", formatter: "{b}: {c}" },
     series: [{
       type: "funnel", left: "6%", right: "6%", top: 6, bottom: 6, minSize: "32%", gap: 3,
+      sort: "none",
       label: { position: "inside", color: "#fff", fontWeight: 600, fontFamily: "Inter", fontSize: 12, formatter: "{b}\n{c}" },
       itemStyle: { borderWidth: 0, borderRadius: 6 },
       color: ["#635BFF", "#7B6FF2", "#1BA9C7", "#0FA968", "#12B76A"],

@@ -25,6 +25,18 @@ def test_bitrix_normalize_deal() -> None:
     assert d["stage"] == "C1:PREPARATION"
 
 
+def test_bitrix_normalize_lead_marks_entity_and_lead_funnel() -> None:
+    lead = bitrix24.normalize_lead({
+        "ID": "77", "TITLE": "Заявка", "STATUS_ID": "IN_PROCESS",
+        "ASSIGNED_BY_ID": "12", "DATE_CREATE": "2026-09-01T10:00:00+03:00",
+    })
+
+    assert lead["external_id"] == "77"
+    assert lead["entity_type"] == "lead"
+    assert lead["funnel_id"] == "lead"
+    assert lead["stage"] == "IN_PROCESS"
+
+
 def test_bitrix_normalize_stage_history_and_activities() -> None:
     history = bitrix24.normalize_stage_history({
         "ID": 90, "OWNER_ID": 3390, "STAGE_ID": "C1:WON",
@@ -195,6 +207,9 @@ def test_bitrix_fetch_stages_and_sources_split_by_entity(monkeypatch) -> None:
 
     stages = {s["id"]: s["name"] for s in adapter.fetch_stages()}
     assert stages == {"NEW": "Новое обращение", "C1:NEW": "Новый заказ"}
+    by_id = {s["id"]: s for s in adapter.fetch_stages()}
+    assert by_id["NEW"]["funnel_id"] == "0"
+    assert by_id["C1:NEW"]["funnel_id"] == "1"
     # Источник с тем же кодом не должен перекрывать название стадии.
     sources = {s["id"]: s["name"] for s in adapter.fetch_sources()}
     assert sources == {"site": "Сайт", "NEW": "Звонок"}

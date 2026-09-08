@@ -28,12 +28,18 @@ class Bitrix24Adapter(Protocol):
         self, created_after: str | None = None, extra_fields: dict[str, str] | None = None,
         modified_after: str | None = None,
     ) -> list[dict]: ...
+    def fetch_leads(
+        self, created_after: str | None = None, extra_fields: dict[str, str] | None = None,
+        modified_after: str | None = None,
+    ) -> list[dict]: ...
     def fetch_deal_fields(self) -> list[dict]: ...  # [{"code","title"}] поля сделки
     def fetch_stage_history(
-        self, deal_ids: list[str] | None = None, changed_after: str | None = None
+        self, deal_ids: list[str] | None = None, changed_after: str | None = None,
+        entity_type: str = "deal",
     ) -> list[dict]: ...
     def fetch_activities(
-        self, deal_ids: list[str], modified_after: str | None = None
+        self, deal_ids: list[str], modified_after: str | None = None,
+        entity_type: str = "deal",
     ) -> list[dict]: ...
     def fetch_tasks(self) -> list[dict]: ...
     # external_id сделок, у которых есть открытая задача или дело в Битрикс24.
@@ -41,6 +47,7 @@ class Bitrix24Adapter(Protocol):
     def fetch_users(self) -> list[dict]: ...  # [{"id","name"}] для резолва ответственных
     def fetch_funnels(self) -> list[dict]: ...  # [{"id","name","is_default"}] воронки
     def fetch_stages(self) -> list[dict]: ...  # [{"id","name"}] стадии воронки
+    def fetch_lead_stages(self) -> list[dict]: ...
     def fetch_sources(self) -> list[dict]: ...  # [{"id","name"}] источники лидов
     def fetch_contact_phones(self, contact_ids: list[str]) -> dict[str, str]: ...
     def create_task(self, payload: dict) -> dict: ...

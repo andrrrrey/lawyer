@@ -15,14 +15,22 @@ class MockBitrix24Adapter:
     def fetch_deal_fields(self) -> list[dict]:
         return []
 
+    def fetch_leads(
+        self, created_after: str | None = None, extra_fields: dict | None = None,  # noqa: ARG002
+        modified_after: str | None = None,  # noqa: ARG002
+    ) -> list[dict]:
+        return []
+
     def fetch_stage_history(
         self, deal_ids: list[str] | None = None, changed_after: str | None = None,  # noqa: ARG002
+        entity_type: str = "deal",  # noqa: ARG002
     ) -> list[dict]:
         # История этапов моделируется полем stage_entered_at сделки.
         return []
 
     def fetch_activities(
         self, deal_ids: list[str], modified_after: str | None = None,  # noqa: ARG002
+        entity_type: str = "deal",  # noqa: ARG002
     ) -> list[dict]:
         # Звонки и встречи в демо моделируются флагами сделки.
         return []
@@ -45,6 +53,9 @@ class MockBitrix24Adapter:
 
     def fetch_stages(self) -> list[dict]:
         # В mock стадии уже заданы читаемыми названиями в демо-сделках.
+        return []
+
+    def fetch_lead_stages(self) -> list[dict]:
         return []
 
     def fetch_sources(self) -> list[dict]:

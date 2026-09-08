@@ -143,6 +143,32 @@ def normalize_deal(raw: dict, extra_fields: dict[str, str] | None = None) -> dic
     }
 
 
+def normalize_lead(raw: dict, extra_fields: dict[str, str] | None = None) -> dict:
+    """Лид Bitrix24 → та же нейтральная модель, что и сделка."""
+    lead_id = raw.get("ID") or raw.get("id")
+    custom: dict[str, str] = {}
+    for key, code in (extra_fields or {}).items():
+        custom[key] = _coerce(raw.get(code))
+    return {
+        "external_id": str(lead_id) if lead_id is not None else None,
+        "ref": f"Лид #{lead_id}" if lead_id is not None else "",
+        "name": raw.get("TITLE") or raw.get("NAME") or "Без названия",
+        "stage": raw.get("STATUS_ID"),
+        "funnel_id": "lead",
+        "entity_type": "lead",
+        "semantic": raw.get("STATUS_SEMANTIC_ID"),
+        "mgr": raw.get("ASSIGNED_BY_ID"),
+        "contact_id": raw.get("CONTACT_ID"),
+        "src": raw.get("SOURCE_ID"),
+        "utm": raw.get("UTM_SOURCE"),
+        "campaign": raw.get("UTM_CAMPAIGN"),
+        "amount": int(float(raw.get("OPPORTUNITY") or 0)),
+        "created": raw.get("DATE_CREATE"),
+        "last_activity": raw.get("DATE_MODIFY"),
+        "custom": custom,
+    }
+
+
 def normalize_stage_history(raw: dict) -> dict | None:
     """Строка ``crm.stagehistory.list`` → нейтральная запись синхронизации."""
     owner_id = raw.get("OWNER_ID") or raw.get("ownerId")
@@ -276,6 +302,33 @@ class RealBitrix24Adapter:
             row["crm_source"] = self.source_key
         return rows
 
+    def fetch_leads(
+        self, created_after: str | None = None,
+        extra_fields: dict[str, str] | None = None,
+        modified_after: str | None = None,
+    ) -> list[dict]:
+        """Лиды портала для отдельной лид-воронки."""
+        select = [
+            "ID", "TITLE", "STATUS_ID", "STATUS_SEMANTIC_ID", "ASSIGNED_BY_ID",
+            "CONTACT_ID", "SOURCE_ID", "OPPORTUNITY", "DATE_CREATE", "DATE_MODIFY",
+            "UTM_SOURCE", "UTM_CAMPAIGN",
+        ]
+        select += [
+            code for code in {value for value in (extra_fields or {}).values() if value}
+            if code not in select
+        ]
+        params: dict[str, Any] = {"select": select}
+        if modified_after:
+            params["filter"] = {">=DATE_MODIFY": modified_after}
+            params["order"] = {"DATE_MODIFY": "DESC"}
+        elif created_after:
+            params["filter"] = {">=DATE_CREATE": created_after}
+            params["order"] = {"DATE_CREATE": "DESC"}
+        rows = [normalize_lead(item, extra_fields) for item in self._call("crm.lead.list", params)]
+        for row in rows:
+            row["crm_source"] = self.source_key
+        return rows
+
     def fetch_deal_fields(self) -> list[dict]:
         """Список полей сделки: [{"code","title"}] (вкл. пользовательские UF_CRM_*)."""
         with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
@@ -290,7 +343,8 @@ class RealBitrix24Adapter:
         return out
 
     def fetch_stage_history(
-        self, deal_ids: list[str] | None = None, changed_after: str | None = None
+        self, deal_ids: list[str] | None = None, changed_after: str | None = None,
+        entity_type: str = "deal",
     ) -> list[dict]:
         """История стадий выбранных сделок, нормализованная для ingest."""
         ids = [str(item) for item in (deal_ids or []) if item]
@@ -303,7 +357,7 @@ class RealBitrix24Adapter:
             if changed_after:
                 filters[">=CREATED_TIME"] = changed_after
             params: dict[str, Any] = {
-                "entityTypeId": 2,
+                "entityTypeId": 1 if entity_type == "lead" else 2,
                 "order": {"CREATED_TIME": "ASC"},
             }
             if filters:
@@ -315,14 +369,18 @@ class RealBitrix24Adapter:
         return out
 
     def fetch_activities(
-        self, deal_ids: list[str], modified_after: str | None = None
+        self, deal_ids: list[str], modified_after: str | None = None,
+        entity_type: str = "deal",
     ) -> list[dict]:
         """Звонки и встречи сделок через ``crm.activity.list``."""
         ids = [str(item) for item in deal_ids if item]
         out: list[dict] = []
         for i in range(0, len(ids), _PAGE):
             batch = ids[i:i + _PAGE]
-            filters: dict[str, Any] = {"OWNER_TYPE_ID": 2, "@OWNER_ID": batch}
+            filters: dict[str, Any] = {
+                "OWNER_TYPE_ID": 1 if entity_type == "lead" else 2,
+                "@OWNER_ID": batch,
+            }
             if modified_after:
                 filters[">=LAST_UPDATED"] = modified_after
             rows = self._call("crm.activity.list", {
@@ -375,7 +433,7 @@ class RealBitrix24Adapter:
         return sorted(funnels, key=lambda item: (item["sort"], item["name"]))
 
     def fetch_stages(self) -> list[dict]:
-        """Справочник стадий воронки: [{"id", "name"}] для резолва STAGE_ID → название.
+        """Справочник стадий воронки с принадлежностью и порядком из Bitrix24.
 
         Фильтр по ENTITY_ID обязателен: crm.status.list отдаёт единым списком все
         справочники портала (стадии, источники, типы), и без фильтра STATUS_ID
@@ -388,8 +446,34 @@ class RealBitrix24Adapter:
             entity = str(s.get("ENTITY_ID") or "")
             # Стадии основной воронки — DEAL_STAGE, дополнительных — DEAL_STAGE_<id>.
             if sid and entity.startswith("DEAL_STAGE"):
-                out.append({"id": str(sid), "name": s.get("NAME") or str(sid)})
+                funnel_id = (
+                    "0" if entity == "DEAL_STAGE"
+                    else entity.removeprefix("DEAL_STAGE_")
+                )
+                out.append({
+                    "id": str(sid),
+                    "name": s.get("NAME") or str(sid),
+                    "funnel_id": funnel_id,
+                    "sort": int(s.get("SORT") or 0),
+                    "semantic": str(s.get("SEMANTICS") or ""),
+                })
         return out
+
+    def fetch_lead_stages(self) -> list[dict]:
+        """Упорядоченные статусы единой лид-воронки портала."""
+        out: list[dict] = []
+        for stage in self._call("crm.status.list", {}):
+            if str(stage.get("ENTITY_ID") or "") != "STATUS" or not stage.get("STATUS_ID"):
+                continue
+            out.append({
+                "id": str(stage["STATUS_ID"]),
+                "name": stage.get("NAME") or str(stage["STATUS_ID"]),
+                "funnel_id": "lead",
+                "sort": int(stage.get("SORT") or 0),
+                "semantic": str(stage.get("SEMANTICS") or ""),
+                "entity_type": "lead",
+            })
+        return sorted(out, key=lambda item: (item["sort"], item["name"]))
 
     def fetch_sources(self) -> list[dict]:
         """Справочник источников: [{"id", "name"}] для резолва SOURCE_ID → название.

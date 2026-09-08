@@ -142,9 +142,40 @@ async def bitrix_funnels(
                 item["error"] = "Сначала сохраните URL входящего вебхука в интеграциях."
             else:
                 try:
-                    item["funnels"] = RealBitrix24Adapter(
+                    adapter = RealBitrix24Adapter(
                         webhook_url=webhook_url, source_key=key
-                    ).fetch_funnels()
+                    )
+                    funnels = adapter.fetch_funnels()
+                    stages_by_funnel: dict[str, list[dict[str, Any]]] = {}
+                    for stage in adapter.fetch_stages():
+                        stages_by_funnel.setdefault(
+                            str(stage.get("funnel_id") or "0"), []
+                        ).append(stage)
+                    for funnel in funnels:
+                        funnel["entity_type"] = "deal"
+                        funnel["stages"] = sorted(
+                            stages_by_funnel.get(str(funnel["id"]), []),
+                            key=lambda stage: (
+                                stage.get("sort", 0), stage.get("name", "")
+                            ),
+                        )
+                    try:
+                        lead_stages = adapter.fetch_lead_stages()
+                    except Exception:  # noqa: BLE001 — сделки доступны и без лидов
+                        lead_stages = []
+                    if lead_stages:
+                        funnels.insert(0, {
+                            "id": "lead",
+                            "name": (
+                                "Воронка лидов УРПАСЭ"
+                                if key == "cloud" else "Воронка лидов"
+                            ),
+                            "is_default": False,
+                            "sort": -1,
+                            "entity_type": "lead",
+                            "stages": lead_stages,
+                        })
+                    item["funnels"] = funnels
                     item["ok"] = True
                 except Exception:  # noqa: BLE001 — безопасное сообщение без URL/токена
                     item["error"] = (

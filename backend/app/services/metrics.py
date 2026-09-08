@@ -197,6 +197,15 @@ async def period_deals(
     )
     if end is not None:
         stmt = stmt.where(Deal.created_at < end)
+    # После первичной настройки общий дашборд включает только явно выбранные
+    # воронки. До настройки сохраняем обратную совместимость и показываем всё.
+    if not funnel or funnel == "all":
+        from app.services import business_settings
+
+        config = await business_settings.get_settings(session)
+        configured = business_settings.configured_funnel_condition(config)
+        if configured is not None:
+            stmt = stmt.where(configured)
     return list((await session.execute(
         _by_deal_filters(stmt, mgr, source, legal_entity, funnel)
     )).scalars().all())
@@ -482,6 +491,12 @@ async def filter_options(session: AsyncSession) -> dict:
     countable = [Deal.on_dashboard.is_(True)]
     if settings.data_source == "real":
         countable.append(Deal.created_at.is_not(None))
+    from app.services import business_settings
+
+    configured = await business_settings.get_settings(session)
+    configured_condition = business_settings.configured_funnel_condition(configured)
+    if configured_condition is not None:
+        countable.append(configured_condition)
 
     mgrs = (await session.execute(
         select(Deal.mgr)
@@ -501,14 +516,11 @@ async def filter_options(session: AsyncSession) -> dict:
         .where(*countable, Deal.funnel_id != "")
         .group_by(Deal.crm_source, Deal.funnel_id)
     )).all()
-    from app.services import business_settings
-
-    configured = await business_settings.get_settings(session)
     configured_funnels = {
         (str(item.get("crm_source")), str(item.get("external_id"))): str(
             item.get("name") or ""
         )
-        for item in configured.get("funnels", [])
+        for item in configured.get("funnels", []) if item.get("enabled", True)
     }
     source_names = {
         str(item.get("key")): str(item.get("name") or item.get("key") or "")
@@ -551,14 +563,118 @@ async def funnel(
     legal_entity: str = "all",
     funnel: str = "all",
 ) -> list[dict]:
-    base, m = await _base_and_mult(
-        session, period, mgr, source, legal_entity, funnel
+    """Фактическая воронка по истории Bitrix и подтверждённым поступлениям 1С.
+
+    Для одной выбранной воронки возвращаются её реальные стадии в порядке,
+    сохранённом из Bitrix. Для общего среза разнородные стадии сворачиваются в
+    управленческую цепочку. «Оплачено» — уникальная связанная сделка, а не число
+    строк поступлений (у одной сделки платежей может быть несколько).
+    """
+    if settings.data_source != "real":
+        base, multiplier = await _base_and_mult(
+            session, period, mgr, source, legal_entity, funnel
+        )
+        stages = [
+            ("leads", "Лиды"),
+            ("qual", "Квалификация"),
+            ("deals", "Сделки"),
+            ("invoices", "Счета"),
+            ("payments", "Оплаты"),
+        ]
+        return [
+            {"label": label, "value": round(base.get(key, 0) * multiplier)}
+            for key, label in stages
+        ]
+
+    rows = await period_deals(session, period, mgr, source, legal_entity, funnel)
+    if not rows:
+        return []
+
+    deal_ids = {row.id for row in rows}
+    history_rows = list((await session.execute(
+        select(StageHistory).where(StageHistory.deal_id.in_(deal_ids))
+    )).scalars().all())
+    reached: dict[int, set[str]] = {row.id: set() for row in rows}
+    for row in rows:
+        if row.stage:
+            reached[row.id].add(str(row.stage).strip().casefold())
+    for item in history_rows:
+        if item.to_stage:
+            reached.setdefault(item.deal_id, set()).add(
+                str(item.to_stage).strip().casefold()
+            )
+
+    now = datetime.now(UTC)
+    receipt_stmt = select(OneCReceipt.matched_deal_id).where(
+        OneCReceipt.excluded.is_(False),
+        OneCReceipt.matched_deal_id.in_(deal_ids),
+        OneCReceipt.registrar_date.is_not(None),
+        OneCReceipt.registrar_date >= _period_start(period, now),
     )
-    stages = [
-        ("leads", "Лиды"), ("qual", "Квалификация"), ("deals", "Сделки"),
-        ("invoices", "Счета"), ("payments", "Оплаты"),
+    end = _period_end(period, now)
+    if end is not None:
+        receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
+    paid_ids = {
+        int(item) for item in (await session.execute(receipt_stmt)).scalars().all()
+        if item is not None
+    }
+
+    from app.services import business_settings
+
+    config = await business_settings.get_settings(session)
+    selected_config = None
+    if funnel and funnel != "all":
+        crm_source, separator, funnel_id = funnel.partition(":")
+        if separator:
+            selected_config = next((
+                item for item in config.get("funnels", [])
+                if item.get("enabled", True)
+                and str(item.get("crm_source")) == crm_source
+                and str(item.get("external_id")) == funnel_id
+            ), None)
+
+    if selected_config:
+        stage_order = [
+            str(stage).strip() for stage in selected_config.get("stage_order", [])
+            if str(stage).strip()
+        ]
+        if stage_order:
+            result = [
+                {
+                    "label": stage,
+                    "value": sum(
+                        1 for row in rows
+                        if stage.casefold() in reached.get(row.id, set())
+                    ),
+                }
+                for stage in stage_order
+            ]
+            result.append({"label": "Оплачено по 1С", "value": len(paid_ids)})
+            return result
+
+    expected_by_funnel = {
+        (str(item.get("crm_source")), str(item.get("external_id"))): {
+            str(stage).strip().casefold()
+            for stage in item.get("expected_payment_stages", [])
+            if str(stage).strip()
+        }
+        for item in config.get("funnels", []) if item.get("enabled", True)
+    }
+    expected_ids = {
+        row.id for row in rows
+        if reached.get(row.id, set()) & expected_by_funnel.get(
+            (row.crm_source, row.funnel_id), set()
+        )
+    }
+    # Фактическая оплата подтверждает прохождение денежного шага, даже если
+    # менеджер пропустил ожидаемую стадию в CRM.
+    expected_ids.update(paid_ids)
+    return [
+        {"label": "Обращения", "value": len(rows)},
+        {"label": "Сделки", "value": sum(1 for row in rows if row.entity_type == "deal")},
+        {"label": "Дошли до ожидания оплаты", "value": len(expected_ids)},
+        {"label": "Оплачено по 1С", "value": len(paid_ids)},
     ]
-    return [{"label": label, "value": round(base.get(key, 0) * m)} for key, label in stages]
 
 
 # Палитра для источников лидов (SOURCE_ID Битрикс24 — произвольный справочник).
@@ -767,15 +883,12 @@ async def _managers_from_deals(
     now = datetime.now(UTC)
     start = _period_start(period, now)
     end = _period_end(period, now)
-    stmt = select(Deal).where(
-        Deal.on_dashboard.is_(True), Deal.mgr.is_not(None), Deal.mgr != "—",
-        Deal.created_at.is_not(None), Deal.created_at >= start,
-    )
-    if end is not None:
-        stmt = stmt.where(Deal.created_at < end)
-    deals = (
-        await session.execute(_by_deal_filters(stmt, mgr, source, legal_entity, funnel))
-    ).scalars().all()
+    deals = [
+        deal for deal in await period_deals(
+            session, period, mgr, source, legal_entity, funnel
+        )
+        if deal.mgr and deal.mgr != "—"
+    ]
     if not deals:
         return []
 
@@ -795,6 +908,17 @@ async def _managers_from_deals(
         if v.get("ptype") == "no_task":
             notask[name] = notask.get(name, 0) + 1
 
+    from app.services import business_settings
+
+    config = await business_settings.get_settings(session)
+    expected_by_funnel = {
+        (str(item.get("crm_source")), str(item.get("external_id"))): {
+            str(stage).strip().casefold()
+            for stage in item.get("expected_payment_stages", [])
+            if str(stage).strip()
+        }
+        for item in config.get("funnels", []) if item.get("enabled", True)
+    }
     agg: dict[str, dict] = {}
     for d in deals:
         m = agg.setdefault(d.mgr, {
@@ -802,12 +926,18 @@ async def _managers_from_deals(
         })
         if d.status_class == "st-mid":  # в работе (не выиграна и не проиграна)
             m["inwork"] += 1
-        if d.invoice:
+        if str(d.stage or "").strip().casefold() in expected_by_funnel.get(
+            (d.crm_source, d.funnel_id), set()
+        ):
             m["invoices"] += 1
 
     if settings.onec_endpoint:
         receipt_stmt = (
-            select(Deal.mgr, func.count(OneCReceipt.id), func.sum(OneCReceipt.amount))
+            select(
+                Deal.mgr,
+                func.count(func.distinct(OneCReceipt.matched_deal_id)),
+                func.sum(OneCReceipt.amount),
+            )
             .join(Deal, OneCReceipt.matched_deal_id == Deal.id)
             .where(
                 OneCReceipt.excluded.is_(False),

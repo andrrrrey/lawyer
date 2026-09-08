@@ -59,7 +59,7 @@ export default function DashboardPage() {
       {kpis.data ? <KpiRow cards={kpis.data} /> : <div style={{ minHeight: 120 }}><Spin /></div>}
 
       <div className="grid two" style={{ marginTop: 16 }}>
-        <ChartCard title="Воронка обработки" sub="лид → квалификация → сделка → счёт → оплата">
+        <ChartCard title="Воронка обработки" sub="стадии Bitrix24 → ожидание оплаты → факт 1С">
           {funnel.data ? <EChart option={funnelOption(funnel.data)} height={280} /> : <Spin />}
         </ChartCard>
         <ChartCard title="Источники лидов" sub="по источнику сделки">

@@ -23,7 +23,15 @@ from sqlalchemy.pool import NullPool
 import app.models  # noqa: F401 — регистрирует таблицы
 from app.core.config import settings
 from app.core.db import Base
-from app.models import AdCost, Deal, ManualExpense, OneCReceipt, StageHistory, Visit
+from app.models import (
+    AdCost,
+    BusinessSettings,
+    Deal,
+    ManualExpense,
+    OneCReceipt,
+    StageHistory,
+    Visit,
+)
 from app.services import analytics, metrics
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_period_test.db"
@@ -227,6 +235,80 @@ def test_global_funnel_filter_uses_portal_and_funnel_id() -> None:
 
         assert [deal.position for deal in box] == [1]
         assert [deal.position for deal in cloud] == [3]
+
+    with_real_data(check)
+
+
+def test_real_funnel_uses_stage_history_and_unique_paid_deals() -> None:
+    """Стадии берутся из истории, а два поступления одной сделки = одна оплата."""
+    async def check(s: AsyncSession) -> None:
+        deal = await s.scalar(select(Deal).where(Deal.position == 1))
+        assert deal is not None
+        s.add(BusinessSettings(id=1, data={
+            "schema_version": 2,
+            "legal_entities": [],
+            "crm_sources": [],
+            "departments": [],
+            "employees": [],
+            "plans": [],
+            "sla_profiles": [],
+            "funnels": [{
+                "key": "box_10",
+                "crm_source": "box",
+                "entity_type": "deal",
+                "external_id": "10",
+                "name": "Продажи",
+                "enabled": True,
+                "legal_entity_key": "uo",
+                "sla_profile_key": "default",
+                "qualification_stages": ["В работе"],
+                "expected_payment_stages": ["Ожидаем оплату"],
+                "successful_stages": ["Оплачено"],
+                "stage_order": ["В работе", "Ожидаем оплату", "Оплачено"],
+            }],
+        }))
+        s.add_all([
+            StageHistory(
+                deal_id=deal.id,
+                from_stage=None,
+                to_stage="В работе",
+                changed_at=deal.created_at,
+            ),
+            StageHistory(
+                deal_id=deal.id,
+                from_stage="В работе",
+                to_stage="Ожидаем оплату",
+                changed_at=deal.created_at + timedelta(hours=1),
+            ),
+            OneCReceipt(
+                external_key="funnel-payment-1",
+                registrar_date=NOW,
+                amount=Decimal("40000"),
+                matched_deal_id=deal.id,
+            ),
+            OneCReceipt(
+                external_key="funnel-payment-2",
+                registrar_date=NOW,
+                amount=Decimal("60000"),
+                matched_deal_id=deal.id,
+            ),
+        ])
+        await s.commit()
+
+        stages = await metrics.funnel(s, "30", funnel="box:10")
+        assert stages == [
+            {"label": "В работе", "value": 1},
+            {"label": "Ожидаем оплату", "value": 1},
+            {"label": "Оплачено", "value": 1},
+            {"label": "Оплачено по 1С", "value": 1},
+        ]
+        summary = await metrics.funnel(s, "30")
+        assert summary == [
+            {"label": "Обращения", "value": 1},
+            {"label": "Сделки", "value": 1},
+            {"label": "Дошли до ожидания оплаты", "value": 1},
+            {"label": "Оплачено по 1С", "value": 1},
+        ]
 
     with_real_data(check)
 

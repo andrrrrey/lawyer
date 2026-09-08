@@ -124,8 +124,13 @@ def _deal_from_bitrix(
     телефон; sources: SOURCE_ID → название источника.
     """
     code = nd.get("stage")
+    entity_type = str(nd.get("entity_type") or "deal")
     semantic = nd.get("semantic")
-    stage = (stages or {}).get(str(code)) or code  # человекочитаемое название стадии
+    stage = (
+        (stages or {}).get(f"{entity_type}:{code}")
+        or (stages or {}).get(str(code))
+        or code
+    )  # человекочитаемое название стадии
     # У сделки без ответственного ASSIGNED_BY_ID приходит нулём — это «не назначен»,
     # а не идентификатор: иначе задача в Битриксе уходила в «Не распределено».
     mgr_id = str(nd.get("mgr") or "").strip()
@@ -148,7 +153,7 @@ def _deal_from_bitrix(
         ref=_bounded_text(nd.get("ref"), 48),
         external_id=_bounded_optional_text(nd.get("external_id"), 48),
         crm_source=str(nd.get("crm_source") or "primary")[:32],
-        entity_type=str(nd.get("entity_type") or "deal")[:16],
+        entity_type=entity_type[:16],
         legal_entity_key=legal_entity_key[:32],
         funnel_id=str(nd.get("funnel_id") or "0")[:48],
         funnel_name=str(nd.get("funnel_name") or "")[:128],
@@ -485,7 +490,7 @@ _DEAL_SYNC_FIELDS = (
     "on_dashboard", "ref", "crm_source", "entity_type", "legal_entity_key",
     "funnel_id", "funnel_name", "name", "src", "campaign", "utm", "mgr", "mgr_id",
     "phone", "client_type", "refuse_reason", "custom", "status_label", "status_class",
-    "stage", "amount", "created_at", "last_activity_at", "has_open_action",
+    "stage", "invoice", "amount", "created_at", "last_activity_at", "has_open_action",
 )
 
 
@@ -544,6 +549,7 @@ async def _sync_crm_timeline(
     session: AsyncSession,
     *,
     source_key: str,
+    entity_type: str = "deal",
     adapter,
     deal_ids: list[str],
     stage_names: dict[str, str],
@@ -561,7 +567,7 @@ async def _sync_crm_timeline(
     deals = list((await session.execute(
         select(Deal).where(
             Deal.crm_source == source_key,
-            Deal.entity_type == "deal",
+            Deal.entity_type == entity_type,
             Deal.external_id.in_(wanted),
         )
     )).scalars().all())
@@ -573,7 +579,11 @@ async def _sync_crm_timeline(
     }
 
     try:
-        history_rows = adapter.fetch_stage_history(wanted)
+        history_rows = (
+            adapter.fetch_stage_history(wanted, entity_type="lead")
+            if entity_type == "lead"
+            else adapter.fetch_stage_history(wanted)
+        )
         existing_history = list((await session.execute(
             select(StageHistory).where(
                 StageHistory.deal_id.in_([deal.id for deal in deals])
@@ -600,9 +610,18 @@ async def _sync_crm_timeline(
             entries.sort(key=lambda item: item[0] or datetime.min.replace(tzinfo=UTC))
             previous: str | None = None
             for changed_at, stage_id in entries:
-                to_stage = (stage_names.get(stage_id) or stage_id)[:64]
+                to_stage = (
+                    stage_names.get(f"{entity_type}:{stage_id}")
+                    or stage_names.get(stage_id)
+                    or stage_id
+                )[:64]
                 from_stage = (
-                    (stage_names.get(previous) or previous)[:64] if previous else None
+                    (
+                        stage_names.get(f"{entity_type}:{previous}")
+                        or stage_names.get(previous)
+                        or previous
+                    )[:64]
+                    if previous else None
                 )
                 keys = {
                     (deal.id, to_stage, identity)
@@ -625,7 +644,13 @@ async def _sync_crm_timeline(
         result["history_error"] = str(exc)
 
     try:
-        activity_rows = adapter.fetch_activities(wanted, modified_after=modified_after)
+        activity_rows = (
+            adapter.fetch_activities(
+                wanted, modified_after=modified_after, entity_type="lead"
+            )
+            if entity_type == "lead"
+            else adapter.fetch_activities(wanted, modified_after=modified_after)
+        )
         existing_activities = {
             (row.deal_id, row.external_id): row
             for row in (await session.execute(
@@ -724,7 +749,16 @@ async def _bitrix_dictionaries(
     # можно исправить даже при вебхуке без scope user_brief.
     users.update(manual_users or {})
     try:
-        stages = {x["id"]: x["name"] for x in b24.fetch_stages()}
+        stage_rows = list(b24.fetch_stages())
+        stages = {
+            key: row["name"]
+            for row in stage_rows
+            for key in (str(row["id"]), f"deal:{row['id']}")
+        }
+        if any(str(item.get("entity_type") or "deal") == "lead" for item in deals):
+            stages.update({
+                f"lead:{row['id']}": row["name"] for row in b24.fetch_lead_stages()
+            })
     except Exception as exc:  # noqa: BLE001 — названия стадий необязательны
         logger.warning("Битрикс24: справочник стадий недоступен: %s", exc)
     try:
@@ -825,20 +859,38 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
 
     now = datetime.now(UTC)
     business_config = await business.get_settings(session)
+    configured_pairs = set(business.configured_funnel_pairs(business_config))
     batches: list[
         tuple[str, list[dict], tuple[dict, dict, dict, dict], set[str], object]
     ] = []
+    lead_sync_failed: set[str] = set()
     for source_key, adapter in connections:
         if full:
             window = (now - timedelta(days=_DEALS_WINDOW_DAYS)).strftime(
                 "%Y-%m-%dT00:00:00+03:00"
             )
             raw = adapter.fetch_deals(created_after=window, extra_fields=extra_fields)
+            if (source_key, "lead", "lead") in configured_pairs:
+                try:
+                    raw.extend(adapter.fetch_leads(
+                        created_after=window
+                    ))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Bitrix24 (%s): лиды недоступны: %s", source_key, exc)
+                    lead_sync_failed.add(source_key)
         else:
             since = (now - timedelta(minutes=_SYNC_OVERLAP_MINUTES)).isoformat(
                 timespec="seconds"
             )
             raw = adapter.fetch_deals(modified_after=since, extra_fields=extra_fields)
+            if (source_key, "lead", "lead") in configured_pairs:
+                try:
+                    raw.extend(adapter.fetch_leads(
+                        modified_after=since
+                    ))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Bitrix24 (%s): лиды недоступны: %s", source_key, exc)
+                    lead_sync_failed.add(source_key)
         for item in raw:
             item["crm_source"] = source_key
         dictionaries = await _bitrix_dictionaries(
@@ -848,7 +900,16 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
         )
         await _refresh_saved_manager_names(session, source_key, dictionaries[0])
         batches.append(
-            (source_key, raw, dictionaries, _open_action_ids(raw, adapter), adapter)
+            (
+                source_key,
+                raw,
+                dictionaries,
+                _open_action_ids(
+                    [item for item in raw if item.get("entity_type", "deal") == "deal"],
+                    adapter,
+                ),
+                adapter,
+            )
         )
 
     existing = {
@@ -883,6 +944,9 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
             fresh.funnel_name = business.funnel_name(
                 business_config, source_key, fresh.funnel_id
             )[:128]
+            fresh.invoice = business.stage_is_expected_payment(
+                business_config, source_key, fresh.funnel_id, fresh.stage
+            )
             position += 1
             ext = fresh.external_id
             identity = (fresh.crm_source, fresh.entity_type, ext or "")
@@ -906,7 +970,11 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
         # Только при полном чтении окна известно, каких сделок в портале больше нет.
         active_sources = {source_key for source_key, *_ in batches}
         for identity, row in existing.items():
-            if identity[0] in active_sources and identity not in seen:
+            if (
+                identity[0] in active_sources
+                and identity not in seen
+                and not (identity[1] == "lead" and identity[0] in lead_sync_failed)
+            ):
                 await session.delete(row)
                 removed += 1
 
@@ -917,14 +985,23 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     normalized = await src_svc.normalize_existing(session)
     timeline: dict[str, dict[str, int | str]] = {}
     for source_key, raw, dictionaries, _action_ids, adapter in batches:
-        timeline[source_key] = await _sync_crm_timeline(
-            session,
-            source_key=source_key,
-            adapter=adapter,
-            deal_ids=[str(row.get("external_id") or "") for row in raw],
-            stage_names=dictionaries[1],
-            modified_after=None if full else since,
-        )
+        for entity_type in ("deal", "lead"):
+            entity_rows = [
+                row for row in raw
+                if str(row.get("entity_type") or "deal") == entity_type
+            ]
+            if not entity_rows:
+                continue
+            timeline_key = source_key if entity_type == "deal" else f"{source_key}_lead"
+            timeline[timeline_key] = await _sync_crm_timeline(
+                session,
+                source_key=source_key,
+                entity_type=entity_type,
+                adapter=adapter,
+                deal_ids=[str(row.get("external_id") or "") for row in entity_rows],
+                stage_names=dictionaries[1],
+                modified_after=None if full else since,
+            )
     from app.services import deal_comments
     comments = await deal_comments.refresh_baseline(session)
     logger.info(
@@ -978,6 +1055,7 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
     # 1. Сделки Битрикс24 (за окно дашборда — иначе выгружается вся история портала).
     bitrix_context: dict[str, tuple[dict, dict, dict, dict, set[str]]] = {}
     connections = factory.get_bitrix24_connections()
+    configured_pairs = set(business.configured_funnel_pairs(business_config))
     if connections:
         since = (datetime.now(UTC) - timedelta(days=_DEALS_WINDOW_DAYS)).strftime(
             "%Y-%m-%dT00:00:00+03:00"
@@ -994,6 +1072,21 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
                 progress,
                 f"Bitrix24: загрузка {source_key} за {_DEALS_WINDOW_DAYS} дней…",
             )
+            if (
+                sources[f"bitrix_{source_key}"]["status"] == "ok"
+                and (source_key, "lead", "lead") in configured_pairs
+            ):
+                lead_rows = await _fetch_source(
+                    sources,
+                    f"bitrix_{source_key}_leads",
+                    f"Bitrix24 leads ({source_key})",
+                    lambda adapter=adapter: adapter.fetch_leads(
+                        created_after=since
+                    ),
+                    progress,
+                    f"Bitrix24: загрузка лидов {source_key}…",
+                )
+                source_deals.extend(lead_rows)
             for row in source_deals:
                 row["crm_source"] = source_key
             deals.extend(source_deals)
@@ -1008,7 +1101,13 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
                 )
                 bitrix_context[source_key] = (
                     *dictionaries,
-                    _open_action_ids(source_deals, adapter),
+                    _open_action_ids(
+                        [
+                            item for item in source_deals
+                            if item.get("entity_type", "deal") == "deal"
+                        ],
+                        adapter,
+                    ),
                 )
     else:
         deals = []
@@ -1122,6 +1221,9 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
         deal.funnel_name = business.funnel_name(
             business_config, source_key, deal.funnel_id
         )[:128]
+        deal.invoice = business.stage_is_expected_payment(
+            business_config, source_key, deal.funnel_id, deal.stage
+        )
         deal_rows.append(deal)
         session.add(deal)
     await session.flush()
@@ -1129,28 +1231,36 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
     # История стадий и контакты загружаются после сделок: локальный deal_id уже
     # известен и факты можно безопасно связать даже при совпадающих ID порталов.
     for source_key, adapter in connections:
-        source_deal_ids = [
-            str(row.get("external_id") or "")
-            for row in deals
-            if str(row.get("crm_source") or "primary") == source_key
-        ]
         context = bitrix_context.get(source_key, ({}, {}, {}, {}, set()))
-        timeline_result = await _sync_crm_timeline(
-            session,
-            source_key=source_key,
-            adapter=adapter,
-            deal_ids=source_deal_ids,
-            stage_names=context[1],
-            commit=False,
-        )
-        sources[f"bitrix_{source_key}_timeline"] = {
-            "status": "error"
-            if "history_error" in timeline_result and "activities_error" in timeline_result
-            else "partial"
-            if "history_error" in timeline_result or "activities_error" in timeline_result
-            else "ok",
-            **timeline_result,
-        }
+        for entity_type in ("deal", "lead"):
+            source_ids = [
+                str(row.get("external_id") or "")
+                for row in deals
+                if str(row.get("crm_source") or "primary") == source_key
+                and str(row.get("entity_type") or "deal") == entity_type
+            ]
+            if not source_ids:
+                continue
+            timeline_result = await _sync_crm_timeline(
+                session,
+                source_key=source_key,
+                entity_type=entity_type,
+                adapter=adapter,
+                deal_ids=source_ids,
+                stage_names=context[1],
+                commit=False,
+            )
+            suffix = "timeline" if entity_type == "deal" else "lead_timeline"
+            sources[f"bitrix_{source_key}_{suffix}"] = {
+                "status": "error"
+                if "history_error" in timeline_result
+                and "activities_error" in timeline_result
+                else "partial"
+                if "history_error" in timeline_result
+                or "activities_error" in timeline_result
+                else "ok",
+                **timeline_result,
+            }
 
     by_external_id: dict[str, list[Deal]] = {}
     for deal in deal_rows:
