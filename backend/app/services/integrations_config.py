@@ -193,6 +193,7 @@ _CHECKS_KEY = "__checks__"
 _RECOMPUTE_KEY = "__recompute__"
 _YANDEX_KEY = "__yandex__"
 _YANDEX_SYNC_KEY = "__yandex_sync__"
+_ONEC_SYNC_KEY = "__onec_sync__"
 _FIELD_MAP_KEY = "__field_map__"
 
 _LEGAL_ENTITY_KEYS = frozenset({"uo", "csv", "urpase"})
@@ -400,6 +401,26 @@ async def merge_yandex_sync_status(session: AsyncSession, patch: dict) -> dict:
     current = await get_yandex_sync_status(session)
     current.update(patch)
     await set_yandex_sync_status(session, current)
+    return current
+
+
+async def get_onec_sync_status(session: AsyncSession) -> dict:
+    row = await _load_row(session)
+    if row and isinstance(row.data, dict):
+        stored = row.data.get(_ONEC_SYNC_KEY)
+        if isinstance(stored, dict):
+            return {**_default_yandex_sync_status(), **stored}
+    return _default_yandex_sync_status()
+
+
+async def merge_onec_sync_status(session: AsyncSession, patch: dict) -> dict:
+    current = await get_onec_sync_status(session)
+    current.update(patch)
+    row = await _load_or_create_row(session)
+    data = dict(row.data) if isinstance(row.data, dict) else {}
+    data[_ONEC_SYNC_KEY] = current
+    row.data = data
+    await session.commit()
     return current
 
 # Семантические поля регламента, которые можно сопоставить с полями воронки

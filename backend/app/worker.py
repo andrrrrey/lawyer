@@ -63,27 +63,36 @@ def ingest_sources() -> None:
     _sync_deals(full=True)
 
 
-def recompute_analytics() -> None:
-    """Ночной пересчёт сквозной аналитики и ROMI по методике (раздел 4 ТЗ).
-
-    В боевом режиме выгружает источники и пересобирает витрины; в mock демо-данные
-    статичны — пересчёт не требуется. Источник данных и доступы читаются из БД внутри
-    ingest.main() (apply_overrides_from_db), поэтому переключение режима в UI
-    подхватывается без перезапуска воркера.
-    """
+def sync_yandex_analytics() -> None:
+    """Ночная выгрузка только Директа и Метрики."""
     from app.services import maintenance
 
-    logger.info("Ночной пересчёт аналитики: запуск")
+    logger.info("Ночная синхронизация Яндекса: запуск")
     try:
-        succeeded = maintenance.run_recompute_blocking()
+        succeeded = maintenance.run_yandex_sync_blocking()
     except Exception:  # noqa: BLE001
-        # Полный traceback попадёт и в docker logs, и в постоянный файл worker.log.
-        logger.exception("Ночной пересчёт аналитики: необработанная ошибка")
+        logger.exception("Ночная синхронизация Яндекса: необработанная ошибка")
     else:
         if not succeeded:
-            logger.error("Ночной пересчёт аналитики: завершён с ошибкой")
+            logger.error("Ночная синхронизация Яндекса: завершена с ошибкой")
             return
-        logger.info("Ночной пересчёт аналитики: процесс завершён")
+        logger.info("Ночная синхронизация Яндекса: завершена")
+
+
+def sync_onec_receipts() -> None:
+    """Ночная выгрузка только поступлений 1С, без Bitrix24 и Яндекса."""
+    from app.services import maintenance
+
+    logger.info("Ночная синхронизация 1С: запуск")
+    try:
+        succeeded = maintenance.run_onec_sync_blocking()
+    except Exception:  # noqa: BLE001
+        logger.exception("Ночная синхронизация 1С: необработанная ошибка")
+    else:
+        if not succeeded:
+            logger.error("Ночная синхронизация 1С: завершена с ошибкой")
+            return
+        logger.info("Ночная синхронизация 1С: завершена")
 
 
 def refresh_ai_insights() -> None:
@@ -120,11 +129,20 @@ def build_scheduler() -> BackgroundScheduler:
     # Агрегированный AI-разбор — раз в
     # неделю, как требует ТЗ, чтобы не вызывать модель на каждое событие.
     scheduler.add_job(
-        recompute_analytics,
+        sync_yandex_analytics,
         "cron",
-        hour=3,
+        hour=2,
         minute=0,
-        id="recompute_analytics",
+        id="sync_yandex_analytics",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        sync_onec_receipts,
+        "cron",
+        hour=2,
+        minute=30,
+        id="sync_onec_receipts",
         max_instances=1,
         coalesce=True,
     )

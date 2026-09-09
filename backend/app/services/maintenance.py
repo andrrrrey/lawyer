@@ -287,3 +287,52 @@ async def _yandex_sync_job() -> bool:
         return False
     finally:
         await engine.dispose()
+
+
+# -------------------------- Отдельная синхронизация 1С -------------------------
+
+def run_onec_sync_blocking() -> bool:
+    return asyncio.run(_onec_sync_job())
+
+
+async def _onec_sync_job() -> bool:
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def report(**patch: Any) -> None:
+        async with session_factory() as session:
+            await cfg.merge_onec_sync_status(session, patch)
+
+    try:
+        await report(
+            state="running", step="Загрузка поступлений 1С…", started_at=_now(),
+            finished_at=None, error=None, sources={}, stats={},
+        )
+        async with session_factory() as session:
+            await cfg.apply_overrides_from_db(session)
+            if settings.data_source != "real":
+                stats = {"skipped": True, "reason": "Демонстрационный режим"}
+            elif not (settings.onec_endpoint and settings.onec_username and settings.onec_password):
+                stats = {"skipped": True, "reason": "Подключение 1С не настроено"}
+            else:
+                from app.services.onec_sync import sync_onec
+                stats = await sync_onec(session)
+        await report(
+            state="done", step="Поступления 1С обновлены", finished_at=_now(), stats=stats,
+            sources={"onec": {"status": "skipped" if stats.get("skipped") else "ok",
+                              "count": stats.get("rows")}},
+        )
+        logger.info("Синхронизация 1С завершена: %s", stats)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Синхронизация 1С упала")
+        try:
+            await report(
+                state="error", step="Ошибка", finished_at=_now(), error=str(exc),
+                sources={"onec": {"status": "error", "message": str(exc)}},
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+    finally:
+        await engine.dispose()
