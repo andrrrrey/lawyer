@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import Any
 
@@ -20,6 +21,7 @@ from app.integrations.real._http import DEFAULT_TIMEOUT, request
 logger = get_logger("lawyer.integrations")
 
 _PAGE = 50
+_PAGE_PAUSE_SECONDS = 0.6
 
 
 def _base(webhook_url: str | None = None) -> str:
@@ -66,6 +68,9 @@ def _call(
             nxt = data.get("next")
             if not nxt:
                 break
+            # Облачный Bitrix24 ограничивает интенсивность REST-запросов. Без
+            # небольшой паузы длинная лид-воронка стабильно доходит до HTTP 429.
+            time.sleep(_PAGE_PAUSE_SECONDS)
             start = nxt
     return out
 

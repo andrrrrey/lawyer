@@ -78,6 +78,27 @@ def test_bitrix_call_unwraps_stage_history_items(monkeypatch) -> None:
     ]
 
 
+def test_bitrix_call_throttles_paginated_requests(monkeypatch) -> None:
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def json(self) -> dict:
+            return self.payload
+
+    responses = iter([
+        FakeResponse({"result": [{"ID": "2"}], "next": 50}),
+        FakeResponse({"result": [{"ID": "1"}]}),
+    ])
+    pauses: list[float] = []
+    monkeypatch.setattr(bitrix24, "request", lambda *a, **kw: next(responses))
+    monkeypatch.setattr(bitrix24, "_base", lambda *a, **kw: "https://portal/rest/1/x")
+    monkeypatch.setattr(bitrix24.time, "sleep", pauses.append)
+
+    assert bitrix24._call("crm.lead.list", {}) == [{"ID": "2"}, {"ID": "1"}]
+    assert pauses == [bitrix24._PAGE_PAUSE_SECONDS]
+
+
 def test_bitrix_call_does_not_hide_rest_errors(monkeypatch) -> None:
     """HTTP 200 с REST-ошибкой — это ошибка, а не пустой справочник."""
     class FakeResponse:
