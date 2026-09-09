@@ -38,60 +38,71 @@ export function funnelOption(stages: FunnelStage[]): EChartsOption {
   };
 }
 
-export function donutOption(sources: Source[]): EChartsOption {
-  const data = sources.map((c) => ({
-    value: c.leads,
-    name: c.short_name,
-    itemStyle: { color: c.color },
+export function sourcesBarOption(sources: Source[]): EChartsOption {
+  const total = sources.reduce((sum, source) => sum + source.leads, 0);
+  const sorted = [...sources].sort((a, b) => b.leads - a.leads);
+  const visible = sorted.length > 10 ? sorted.slice(0, 8) : sorted;
+  const hidden = sorted.slice(visible.length);
+  const rows = visible.map((source) => ({
+    name: source.short_name,
+    value: source.leads,
+    percent: total ? source.leads / total * 100 : 0,
+    color: source.color,
   }));
+  if (hidden.length) {
+    const otherLeads = hidden.reduce((sum, source) => sum + source.leads, 0);
+    rows.push({
+      name: `Прочие (${hidden.length} источников)`,
+      value: otherLeads,
+      percent: total ? otherLeads / total * 100 : 0,
+      color: "#B8BFCC",
+    });
+  }
+  const data = [...rows].reverse();
   return {
-    tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
-    legend: {
-      type: "scroll",
-      orient: "vertical",
-      top: 12,
-      right: 4,
-      bottom: 12,
-      width: "48%",
-      icon: "circle",
-      itemWidth: 8,
-      itemHeight: 8,
-      itemGap: 10,
-      pageIconSize: 10,
-      pageButtonGap: 8,
-      pageTextStyle: { color: "#8A92A6", fontSize: 10, fontFamily: "Inter" },
-      tooltip: { show: true },
-      textStyle: {
-        color: "#6B7488",
+    tooltip: {
+      trigger: "item",
+      formatter: (params: unknown) => {
+        const item = (params as { data: { name: string; value: number; percent: number } }).data;
+        return `${item.name}<br/><b>${item.value.toLocaleString("ru-RU")}</b> · ${item.percent.toFixed(1)}%`;
+      },
+    },
+    grid: { left: 8, right: 76, top: 4, bottom: 4, containLabel: true },
+    xAxis: {
+      type: "value",
+      show: false,
+      max: (value: { max: number }) => value.max * 1.08,
+    },
+    yAxis: {
+      type: "category",
+      data: data.map((item) => item.name),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: {
+        color: "#5F687B",
         fontSize: 11,
         fontFamily: "Inter",
-        width: 210,
+        width: 190,
         overflow: "truncate",
-        ellipsis: "…",
       },
     },
     series: [{
-      type: "pie",
-      radius: ["48%", "70%"],
-      center: ["25%", "50%"],
-      avoidLabelOverlap: true,
-      itemStyle: { borderColor: "#fff", borderWidth: 3, borderRadius: 5 }, label: { show: false },
-      data,
-    }],
-    media: [{
-      query: { maxWidth: 560 },
-      option: {
-        legend: {
-          type: "scroll",
-          orient: "horizontal",
-          left: 8,
-          right: 8,
-          top: "auto",
-          bottom: 0,
-          width: "auto",
-          textStyle: { width: 150, overflow: "truncate", ellipsis: "…" },
+      type: "bar",
+      barMaxWidth: 20,
+      data: data.map((item) => ({
+        ...item,
+        itemStyle: { color: item.color, borderRadius: [0, 6, 6, 0] },
+      })),
+      label: {
+        show: true,
+        position: "right",
+        color: "#6B7488",
+        fontFamily: "Space Grotesk",
+        fontSize: 10,
+        formatter: (params: unknown) => {
+          const item = (params as { data: { value: number; percent: number } }).data;
+          return `${item.value.toLocaleString("ru-RU")} · ${item.percent.toFixed(1)}%`;
         },
-        series: [{ center: ["50%", "38%"], radius: ["38%", "58%"] }],
       },
     }],
   };
