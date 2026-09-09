@@ -81,6 +81,7 @@ class FakeBitrix:
 
     def __init__(self, deals: list[dict]) -> None:
         self.deals = deals
+        self.leads: list[dict] = []
         self.users = [{"id": "12", "name": "Михаил Иванов"}]
         self.history: list[dict] = []
         self.activities: list[dict] = []
@@ -94,10 +95,17 @@ class FakeBitrix:
         self.last_call = {"created_after": created_after, "modified_after": modified_after}
         return [dict(d) for d in self.deals]
 
+    def fetch_leads(self, created_after=None, modified_after=None):
+        self.last_call = {"created_after": created_after, "modified_after": modified_after}
+        return [dict(row) for row in self.leads]
+
     def fetch_users(self):
         return [dict(row) for row in self.users]
 
     def fetch_stages(self):
+        return [dict(row) for row in self.stages]
+
+    def fetch_lead_stages(self):
         return [dict(row) for row in self.stages]
 
     def fetch_sources(self):
@@ -106,10 +114,14 @@ class FakeBitrix:
     def fetch_contact_phones(self, contact_ids):  # noqa: ARG002
         return {}
 
-    def fetch_stage_history(self, deal_ids=None, changed_after=None):  # noqa: ARG002
+    def fetch_stage_history(
+        self, deal_ids=None, changed_after=None, entity_type="deal"  # noqa: ARG002
+    ):
         return [dict(row) for row in self.history]
 
-    def fetch_activities(self, deal_ids, modified_after=None):  # noqa: ARG002
+    def fetch_activities(
+        self, deal_ids, modified_after=None, entity_type="deal"  # noqa: ARG002
+    ):
         return [dict(row) for row in self.activities]
 
     def fetch_open_action_deal_ids(self, deal_ids):  # noqa: ARG002
@@ -381,6 +393,61 @@ def test_full_sync_removes_deals_gone_from_portal(monkeypatch) -> None:
         assert portal.last_call["created_after"] and not portal.last_call["modified_after"]
         refs = {d.external_id for d in (await s.execute(select(Deal))).scalars().all()}
         assert refs == {"100"}
+
+    with_db(check)
+
+
+def test_targeted_lead_sync_deduplicates_and_keeps_other_scopes(monkeypatch) -> None:
+    """Целевая загрузка лидов не удаляет сделки и не создаёт дубль ID."""
+    async def check(s: AsyncSession) -> None:
+        box = FakeBitrix([_raw("box-deal", title="Сделка коробки")])
+        cloud = FakeBitrix([_raw("cloud-deal", title="Сделка облака")])
+        old_lead = _raw("lead-old", title="Старый лид")
+        old_lead.update({"entity_type": "lead", "funnel_id": "lead"})
+        cloud.leads = [old_lead]
+        monkeypatch.setattr(
+            factory,
+            "get_bitrix24_connections",
+            lambda: [("box", box), ("cloud", cloud)],
+        )
+        config = deepcopy(BUSINESS_SETTINGS)
+        config["funnels"] = [{
+            "key": "cloud_leads",
+            "name": "Лиды",
+            "crm_source": "cloud",
+            "entity_type": "lead",
+            "external_id": "lead",
+            "legal_entity_key": "urpase",
+            "enabled": True,
+        }]
+
+        async def get_config(_session):  # noqa: ANN001
+            return config
+
+        monkeypatch.setattr(business_settings, "get_settings", get_config)
+        await ingest.refresh_deals(s, full=True)
+
+        new_lead = _raw("lead-new", title="Новый лид")
+        new_lead.update({"entity_type": "lead", "funnel_id": "lead"})
+        duplicate = dict(new_lead)
+        duplicate["name"] = "Дубликат той же страницы"
+        cloud.leads = [new_lead, duplicate]
+        result = await ingest.refresh_deals(
+            s,
+            full=True,
+            source_keys={"cloud"},
+            entity_types={"lead"},
+        )
+
+        rows = (await s.execute(select(Deal))).scalars().all()
+        identities = [(row.crm_source, row.entity_type, row.external_id) for row in rows]
+        assert identities.count(("cloud", "lead", "lead-new")) == 1
+        assert ("cloud", "lead", "lead-old") not in identities
+        assert ("cloud", "deal", "cloud-deal") in identities
+        assert ("box", "deal", "box-deal") in identities
+        assert result["scopes"] == ["cloud:lead"]
+        assert (result["created"], result["removed"]) == (1, 1)
+        assert len({row.position for row in rows}) == len(rows)
 
     with_db(check)
 

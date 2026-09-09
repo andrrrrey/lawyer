@@ -103,11 +103,77 @@ def run_deals_sync_blocking() -> None:
         _deals_lock.release()
 
 
-async def sync_deals(full: bool = False) -> dict[str, Any]:
+async def sync_deals(
+    full: bool = False,
+    *,
+    source_keys: set[str] | None = None,
+    entity_types: set[str] | None = None,
+) -> dict[str, Any]:
     """Синхронизирует сделки из Битрикс24 (без выгрузки рекламных источников)."""
     from app.services import ingest as ingest_mod
 
-    return await _with_session(lambda s: ingest_mod.refresh_deals(s, full=full))
+    return await _with_session(lambda s: ingest_mod.refresh_deals(
+        s,
+        full=full,
+        source_keys=source_keys,
+        entity_types=entity_types,
+    ))
+
+
+def run_targeted_sync_blocking(
+    *, source_keys: set[str], entity_types: set[str], full: bool = True
+) -> None:
+    """Целевая синхронизация выбранных CRM-сущностей с общим статусом в UI."""
+    asyncio.run(_targeted_sync_job(
+        source_keys=source_keys, entity_types=entity_types, full=full
+    ))
+
+
+async def _targeted_sync_job(
+    *, source_keys: set[str], entity_types: set[str], full: bool
+) -> None:
+    label = ", ".join(
+        f"{source}:{entity}"
+        for source in sorted(source_keys)
+        for entity in sorted(entity_types)
+    )
+
+    async def report(**patch: Any) -> None:
+        await _with_session(lambda s: _save_targeted_status(s, patch))
+
+    try:
+        await report(
+            state="running",
+            step=f"Целевая синхронизация: {label}",
+            started_at=_now(),
+            finished_at=None,
+            error=None,
+        )
+        result = await sync_deals(
+            full=full, source_keys=source_keys, entity_types=entity_types
+        )
+        await report(
+            state="done",
+            step=f"Готово: {label}",
+            finished_at=_now(),
+            stats={"targeted_sync": result},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Целевая синхронизация %s упала", label)
+        await report(
+            state="error",
+            step=f"Ошибка целевой синхронизации: {label}",
+            finished_at=_now(),
+            error=str(exc),
+        )
+        raise
+
+
+async def _save_targeted_status(
+    session: AsyncSession, patch: dict[str, Any]
+) -> dict[str, Any]:
+    await cfg.merge_recompute_status(session, patch)
+    return patch
 
 
 # --------------------------- Пересчёт (фоново, со статусом) ---------------------

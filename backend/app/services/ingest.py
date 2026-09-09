@@ -858,7 +858,13 @@ async def refresh_crm_timelines(session: AsyncSession, *, full: bool = False) ->
     return {"skipped": False, "full": full, "sources": output}
 
 
-async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
+async def refresh_deals(
+    session: AsyncSession,
+    *,
+    full: bool = False,
+    source_keys: set[str] | None = None,
+    entity_types: set[str] | None = None,
+) -> dict:
     """Синхронизирует сделки из Битрикс24 без выгрузки рекламных источников.
 
     Это быстрый путь для событий портала и частой сверки: рекламные витрины
@@ -873,6 +879,23 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     if settings.data_source != "real":
         return {"skipped": True, "reason": "демо-режим", "updated": 0, "created": 0}
     connections = factory.get_bitrix24_connections()
+    selected_sources = (
+        {str(item) for item in source_keys} if source_keys is not None else None
+    )
+    requested_types = (
+        {str(item) for item in entity_types}
+        if entity_types is not None
+        else {"deal", "lead"}
+    )
+    unknown_types = requested_types - {"deal", "lead"}
+    if unknown_types:
+        raise ValueError(f"Неизвестные типы CRM-сущностей: {sorted(unknown_types)}")
+    if selected_sources is not None:
+        connections = [
+            (source_key, adapter)
+            for source_key, adapter in connections
+            if source_key in selected_sources
+        ]
     if not connections:
         return {"skipped": True, "reason": "Битрикс24 не настроен", "updated": 0, "created": 0}
 
@@ -885,34 +908,49 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     batches: list[
         tuple[str, list[dict], tuple[dict, dict, dict, dict], set[str], object]
     ] = []
-    lead_sync_failed: set[str] = set()
+    successful_scopes: set[tuple[str, str]] = set()
+    since = None if full else (now - timedelta(minutes=_SYNC_OVERLAP_MINUTES)).isoformat(
+        timespec="seconds"
+    )
     for source_key, adapter in connections:
+        raw: list[dict] = []
         if full:
             window = (now - timedelta(days=_DEALS_WINDOW_DAYS)).strftime(
                 "%Y-%m-%dT00:00:00+03:00"
             )
-            raw = adapter.fetch_deals(created_after=window, extra_fields=extra_fields)
-            if (source_key, "lead", "lead") in configured_pairs:
+            if "deal" in requested_types:
+                raw.extend(adapter.fetch_deals(
+                    created_after=window, extra_fields=extra_fields
+                ))
+                successful_scopes.add((source_key, "deal"))
+            if (
+                "lead" in requested_types
+                and (source_key, "lead", "lead") in configured_pairs
+            ):
                 try:
                     raw.extend(adapter.fetch_leads(
                         created_after=window
                     ))
+                    successful_scopes.add((source_key, "lead"))
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Bitrix24 (%s): лиды недоступны: %s", source_key, exc)
-                    lead_sync_failed.add(source_key)
         else:
-            since = (now - timedelta(minutes=_SYNC_OVERLAP_MINUTES)).isoformat(
-                timespec="seconds"
-            )
-            raw = adapter.fetch_deals(modified_after=since, extra_fields=extra_fields)
-            if (source_key, "lead", "lead") in configured_pairs:
+            if "deal" in requested_types:
+                raw.extend(adapter.fetch_deals(
+                    modified_after=since, extra_fields=extra_fields
+                ))
+                successful_scopes.add((source_key, "deal"))
+            if (
+                "lead" in requested_types
+                and (source_key, "lead", "lead") in configured_pairs
+            ):
                 try:
                     raw.extend(adapter.fetch_leads(
                         modified_after=since
                     ))
+                    successful_scopes.add((source_key, "lead"))
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Bitrix24 (%s): лиды недоступны: %s", source_key, exc)
-                    lead_sync_failed.add(source_key)
         for item in raw:
             item["crm_source"] = source_key
         raw = deduplicate_crm_rows(raw)
@@ -945,6 +983,8 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     # создания). При частичной сверке позиции существующих строк не трогаем, а
     # новые дописываем в конец: иначе номера столкнулись бы с уже сохранёнными,
     # и порядок таблицы лидов (а с ним и выбор «оригинала» среди дублей) поплыл бы.
+    scoped = source_keys is not None or entity_types is not None
+    replace_positions = full and not scoped
     next_position = max((d.position for d in existing.values()), default=-1) + 1
     position = 0
     seen: set[tuple[str, str, str]] = set()
@@ -975,14 +1015,14 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
             identity = (fresh.crm_source, fresh.entity_type, ext or "")
             current = existing.get(identity) if ext else None
             if current is None:
-                if not full:
+                if not replace_positions:
                     fresh.position = next_position
                     next_position += 1
                 session.add(fresh)
                 created += 1
             else:
                 _apply_deal_fields(current, fresh)
-                if full:
+                if replace_positions:
                     current.position = position - 1
                 updated += 1
             if ext:
@@ -991,12 +1031,10 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
     removed = 0
     if full:
         # Только при полном чтении окна известно, каких сделок в портале больше нет.
-        active_sources = {source_key for source_key, *_ in batches}
         for identity, row in existing.items():
             if (
-                identity[0] in active_sources
+                (identity[0], identity[1]) in successful_scopes
                 and identity not in seen
-                and not (identity[1] == "lead" and identity[0] in lead_sync_failed)
             ):
                 await session.delete(row)
                 removed += 1
@@ -1035,6 +1073,7 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
         "skipped": False, "created": created, "updated": updated,
         "removed": removed, "full": full, "timeline": timeline,
         "deal_comments": comments,
+        "scopes": sorted(f"{source}:{entity}" for source, entity in successful_scopes),
     }
 
 
