@@ -49,5 +49,8 @@ def test_scheduler_jobs_registered() -> None:
     scheduler = worker.build_scheduler()
     ids = {j.id for j in scheduler.get_jobs()}
     assert {
-        "reconcile_regulation", "ingest_sources", "recompute_analytics", "refresh_ai_insights"
+        "reconcile_regulation", "recompute_analytics", "refresh_ai_insights"
     } <= ids
+    assert "ingest_sources" not in ids
+    nightly = scheduler.get_job("recompute_analytics")
+    assert str(nightly.trigger) == "cron[hour='3', minute='0']"

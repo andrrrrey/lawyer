@@ -178,12 +178,12 @@ async def _save_targeted_status(
 
 # --------------------------- Пересчёт (фоново, со статусом) ---------------------
 
-def run_recompute_blocking() -> None:
+def run_recompute_blocking() -> bool:
     """Точка входа фонового потока: выполняет пересчёт и пишет статус в БД."""
-    asyncio.run(_recompute_job())
+    return asyncio.run(_recompute_job())
 
 
-async def _recompute_job() -> None:
+async def _recompute_job() -> bool:
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -218,11 +218,13 @@ async def _recompute_job() -> None:
                      mode=result.get("mode"), sources=result.get("sources", {}),
                      stats=result.get("stats", {}))
         logger.info("Пересчёт завершён: %s", result.get("stats"))
+        return True
     except Exception as exc:  # noqa: BLE001 — фиксируем ошибку в статусе
         logger.exception("Пересчёт упал")
         try:
             await report(state="error", step="Ошибка", finished_at=_now(), error=str(exc))
         except Exception:  # noqa: BLE001
             pass
+        return False
     finally:
         await engine.dispose()

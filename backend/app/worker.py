@@ -71,14 +71,19 @@ def recompute_analytics() -> None:
     ingest.main() (apply_overrides_from_db), поэтому переключение режима в UI
     подхватывается без перезапуска воркера.
     """
+    from app.services import maintenance
+
+    logger.info("Ночной пересчёт аналитики: запуск")
     try:
-        import asyncio
-
-        from app.services import ingest as ingest_mod
-
-        asyncio.run(ingest_mod.main())
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Ночной пересчёт аналитики: ошибка %s", exc)
+        succeeded = maintenance.run_recompute_blocking()
+    except Exception:  # noqa: BLE001
+        # Полный traceback попадёт и в docker logs, и в постоянный файл worker.log.
+        logger.exception("Ночной пересчёт аналитики: необработанная ошибка")
+    else:
+        if not succeeded:
+            logger.error("Ночной пересчёт аналитики: завершён с ошибкой")
+            return
+        logger.info("Ночной пересчёт аналитики: процесс завершён")
 
 
 def refresh_ai_insights() -> None:
@@ -109,14 +114,20 @@ def build_scheduler() -> BackgroundScheduler:
         reconcile_regulation, "interval", minutes=5, id="reconcile_regulation",
         max_instances=1, coalesce=True,
     )
-    # Полная сверка окна — реже: ловит удалённые в портале сделки.
-    scheduler.add_job(
-        ingest_sources, "interval", hours=1, id="ingest_sources",
-        max_instances=1, coalesce=True,
-    )
-    # Ночной пересчёт выполняется ежедневно; агрегированный AI-разбор — раз в
+    # Полную загрузку окна не запускаем днём: большой облачный портал требует
+    # тысячи REST-запросов. Она выполняется один раз ночью. Дубли ответов Bitrix
+    # отбрасываются до записи, а короткая сверка выше обновляет строки по ID.
+    # Агрегированный AI-разбор — раз в
     # неделю, как требует ТЗ, чтобы не вызывать модель на каждое событие.
-    scheduler.add_job(recompute_analytics, "cron", hour=3, minute=0, id="recompute_analytics")
+    scheduler.add_job(
+        recompute_analytics,
+        "cron",
+        hour=3,
+        minute=0,
+        id="recompute_analytics",
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.add_job(
         refresh_ai_insights,
         "cron",

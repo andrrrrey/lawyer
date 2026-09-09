@@ -47,6 +47,9 @@ services:
     env_file: .env
     environment:
       RUN_MODE: worker
+      LAWYER_LOG_FILE: /var/log/lawyer/worker.log
+    volumes:
+      - ./logs:/var/log/lawyer
     depends_on:
       api:
         condition: service_healthy
