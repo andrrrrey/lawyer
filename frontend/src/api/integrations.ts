@@ -41,8 +41,57 @@ export interface IntegrationsConfig {
   data_source: DataSource;
   ai_configured: boolean;
   providers: IntegrationProvider[];
+  yandex: YandexConfig;
   field_map: FieldMap;
   field_targets: FieldTarget[];
+}
+
+export interface YandexCredential {
+  id: string;
+  name: string;
+  login: string;
+  token: string;
+  token_filled?: boolean;
+  enabled: boolean;
+}
+
+export interface YandexDirectAccount {
+  id: string;
+  name: string;
+  credential_id: string;
+  client_login: string;
+  legal_entity_key: string;
+  enabled: boolean;
+}
+
+export interface YandexMetrikaCounter {
+  id: string;
+  name: string;
+  credential_id: string;
+  counter_id: string;
+  site: string;
+  legal_entity_key: string;
+  enabled: boolean;
+}
+
+export interface YandexConfig {
+  client_id: string;
+  credentials: YandexCredential[];
+  direct_accounts: YandexDirectAccount[];
+  metrika_counters: YandexMetrikaCounter[];
+  last_checks: Record<string, CheckResult>;
+}
+
+export interface YandexCountersResult {
+  ok: boolean;
+  error?: string;
+  counters: Array<{
+    counter_id: string;
+    name: string;
+    site: string;
+    owner_login: string;
+    permission: string;
+  }>;
 }
 
 export type RecomputeState = "idle" | "running" | "done" | "error";
@@ -51,6 +100,8 @@ export interface RecomputeSource {
   status: string; // ok | error | skipped
   count?: number;
   message?: string;
+  label?: string;
+  retained_previous?: boolean;
 }
 
 export interface RecomputeStatus {
@@ -141,6 +192,46 @@ export function useRecomputeStatus() {
   return useQuery<RecomputeStatus>({
     queryKey: ["integrations", "recompute", "status"],
     queryFn: () => api.get("/integrations/recompute/status"),
+    refetchInterval: (q) => (q.state.data?.state === "running" ? 1500 : false),
+  });
+}
+
+export function useSaveYandex() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: YandexConfig) => api.put<YandexConfig>("/integrations/yandex", payload),
+    onSuccess: (data) => {
+      qc.setQueryData<IntegrationsConfig | undefined>(["integrations"], (prev) =>
+        prev ? { ...prev, yandex: data } : prev,
+      );
+    },
+  });
+}
+
+export function useCheckYandex() {
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ results: Record<string, CheckResult> }>("/integrations/yandex/check"),
+  });
+}
+
+export function useDiscoverYandexCounters() {
+  return useMutation({
+    mutationFn: (credentialId: string) =>
+      api.post<YandexCountersResult>(`/integrations/yandex/credentials/${credentialId}/counters`),
+  });
+}
+
+export function useStartYandexSync() {
+  return useMutation({
+    mutationFn: () => api.post<RecomputeStatus>("/integrations/yandex/sync"),
+  });
+}
+
+export function useYandexSyncStatus() {
+  return useQuery<RecomputeStatus>({
+    queryKey: ["integrations", "yandex", "sync", "status"],
+    queryFn: () => api.get("/integrations/yandex/sync/status"),
     refetchInterval: (q) => (q.state.data?.state === "running" ? 1500 : false),
   });
 }

@@ -443,6 +443,7 @@ tr.rk-row-mid td:first-child { box-shadow: inset 3px 0 0 var(--amber); }
 .intg-src-chip { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 7px; background: #EEF0F5; color: #586074; }
 .intg-src-chip.ok { background: var(--green-soft); color: #0A8A50; }
 .intg-src-chip.err { background: var(--red-soft); color: #B23025; }
+.intg-src-chip.warn { background: var(--amber-soft); color: #B25E09; }
 .intg-src-chip.idle { background: #EEF0F5; color: #6B7488; }
 
 /* ---------- Пустое состояние раздела ---------- */
@@ -487,6 +488,34 @@ tr.rk-row-mid td:first-child { box-shadow: inset 3px 0 0 var(--amber); }
 .intg-src-errors { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .intg-src-error { font-size: 12px; color: var(--danger, #c0392b); line-height: 1.4; }
 .intg-src-error b { font-weight: 600; }
+
+.yandex-settings .card-h { align-items: flex-start; }
+.yandex-head-actions, .yandex-section-head { display: flex; align-items: center; gap: 10px; }
+.yandex-section-head { justify-content: space-between; margin-bottom: 10px; }
+.yandex-section-head span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+.yandex-body { display: flex; flex-direction: column; gap: 22px; }
+.yandex-body section { border-bottom: 1px solid var(--line2); padding-bottom: 20px; }
+.yandex-body section:last-of-type { border-bottom: 0; padding-bottom: 0; }
+.yandex-body h4 { margin: 0 0 11px; font-size: 14px; }
+.yandex-app-row { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: center; }
+.yandex-app-row .intg-field { margin: 0; }
+.yandex-list { display: flex; flex-direction: column; gap: 9px; }
+.yandex-row { display: grid; align-items: center; gap: 9px; }
+.yandex-row.credential { grid-template-columns: auto 1fr 1fr 1.35fr auto auto; }
+.yandex-row.resource { grid-template-columns: auto 1.2fr 1fr 1fr 150px auto; }
+.yandex-resource { padding: 10px; border: 1px solid var(--line2); border-radius: 10px; background: #FAFBFD; }
+.yandex-resource .intg-result { margin-top: 8px; }
+.yandex-site, .yandex-empty { color: var(--muted); font-size: 12px; margin: 6px 0 0 35px; }
+.yandex-empty { margin: 0; padding: 12px; border: 1px dashed var(--line); border-radius: 9px; }
+.yandex-working { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+@media (max-width: 1200px) {
+  .yandex-row.credential, .yandex-row.resource { grid-template-columns: auto 1fr 1fr; }
+  .yandex-row.credential > :nth-child(n+5), .yandex-row.resource > :nth-child(n+5) { justify-self: start; }
+}
+@media (max-width: 700px) {
+  .yandex-head-actions, .yandex-section-head, .yandex-app-row { align-items: stretch; flex-direction: column; display: flex; }
+  .yandex-row.credential, .yandex-row.resource { grid-template-columns: auto 1fr; }
+}
 
 /* ==========================================================================
    Мобильная адаптация

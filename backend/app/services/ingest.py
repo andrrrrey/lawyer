@@ -1180,10 +1180,31 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
     search_queries: list[dict] = []
     direct_costs: list[dict] = []
     metrika_visits: list[dict] = []
-    yandex_connections = factory.get_yandex_connections()
-    if yandex_connections:
-        for entity_key, direct_adapter, metrika_adapter in yandex_connections:
-            account_key = entity_key or "legacy"
+    from app.integrations.real import RealYandexDirectAdapter, RealYandexMetrikaAdapter
+    from app.services.integrations_config import get_yandex_config
+
+    yandex_config = await get_yandex_config(session, masked=False)
+    yandex_credentials = {
+        item["id"]: item for item in yandex_config["credentials"]
+        if item.get("enabled", True) and item.get("token")
+    }
+    active_direct = [
+        item for item in yandex_config["direct_accounts"]
+        if item.get("enabled", True) and item.get("credential_id") in yandex_credentials
+    ]
+    active_counters = [
+        item for item in yandex_config["metrika_counters"]
+        if item.get("enabled", True) and item.get("credential_id") in yandex_credentials
+    ]
+    if active_direct or active_counters:
+        for account in active_direct:
+            credential = yandex_credentials[account["credential_id"]]
+            entity_key = str(account.get("legal_entity_key") or "")
+            account_key = str(account.get("id") or entity_key or "direct")[:48]
+            direct_adapter = RealYandexDirectAdapter(
+                oauth_token=credential["token"],
+                direct_login=str(account.get("client_login") or ""),
+            )
             costs = await _fetch_source(
                 sources,
                 f"yandex_direct_{account_key}",
@@ -1207,6 +1228,14 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
                     account_key,
                     exc,
                 )
+        for counter in active_counters:
+            credential = yandex_credentials[counter["credential_id"]]
+            entity_key = str(counter.get("legal_entity_key") or "")
+            account_key = str(counter.get("id") or entity_key or "metrika")[:48]
+            metrika_adapter = RealYandexMetrikaAdapter(
+                oauth_token=credential["token"],
+                counter_id=str(counter.get("counter_id") or ""),
+            )
             visits = await _fetch_source(
                 sources,
                 f"yandex_metrika_{account_key}",

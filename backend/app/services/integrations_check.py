@@ -161,8 +161,8 @@ def _check_yandex_account(token: str, counter_id: str) -> dict:
     return _err(f"API Яндекса вернул HTTP {resp.status_code}.")
 
 
-def check_yandex_direct() -> dict:
-    token = settings.yandex_oauth_token or ""
+def check_yandex_direct_resource(token: str, client_login: str = "") -> dict:
+    """Проверяет конкретную пару OAuth-токен + кабинет Директа."""
     if not token:
         return _missing("Не указан OAuth-токен Яндекса.")
     headers = {
@@ -170,8 +170,8 @@ def check_yandex_direct() -> dict:
         "Accept-Language": "ru",
         "Content-Type": "application/json; charset=utf-8",
     }
-    if settings.yandex_direct_login:
-        headers["Client-Login"] = settings.yandex_direct_login
+    if client_login:
+        headers["Client-Login"] = client_login
     body = {
         "method": "get",
         "params": {
@@ -195,13 +195,24 @@ def check_yandex_direct() -> dict:
         err = data["error"]
         code = err.get("error_code")
         detail = err.get("error_detail") or err.get("error_string") or ""
-        if code in (53, 58):  # невалидный/просроченный токен, нет прав
-            return _err("Токен недействителен или нет доступа к API.", detail)
+        if code == 58:
+            return _err(
+                "Приложение этого токена не одобрено для API Директа.",
+                "Получите новый токен через Client ID одобренного приложения. " + detail,
+            )
+        if code == 53:
+            return _err("Токен недействителен или просрочен.", detail)
         return _err("API Директа вернул ошибку.", f"код {code}: {detail}")
     if resp.status_code == 200:
         campaigns = (data.get("result") or {}).get("Campaigns", [])
         return _ok("Токен принят API Директа.", f"Доступно кампаний: {len(campaigns)}+")
     return _err(f"API Директа недоступен (HTTP {resp.status_code}).")
+
+
+def check_yandex_direct() -> dict:
+    return check_yandex_direct_resource(
+        settings.yandex_oauth_token or "", settings.yandex_direct_login or ""
+    )
 
 
 def _fmt_int(n: int) -> str:
@@ -257,6 +268,79 @@ def check_yandex_metrika() -> dict:
     except ValueError:
         pass
     return _err(f"API Метрики вернул HTTP {resp.status_code}.", detail)
+
+
+def check_yandex_metrika_resource(token: str, counter: str) -> dict:
+    """Проверяет один счётчик без изменения глобальных settings."""
+    if not token:
+        return _missing("Не указан OAuth-токен Яндекса.")
+    if not counter:
+        return _missing("Не указан номер счётчика Метрики.")
+    params = {
+        "ids": counter, "metrics": "ym:s:visits",
+        "date1": "yesterday", "date2": "yesterday", "limit": 1,
+    }
+    try:
+        resp = httpx.get(
+            "https://api-metrika.yandex.net/stat/v1/data",
+            params=params, headers={"Authorization": f"OAuth {token}"},
+            timeout=_TIMEOUT, follow_redirects=_FOLLOW,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err("Ошибка соединения с API Метрики.", _describe_exc(exc))
+    if resp.status_code == 200:
+        visits = _metrika_totals_visits(resp)
+        suffix = f" · визитов вчера: {_fmt_int(visits)}" if visits is not None else ""
+        return _ok(f"Счётчик {counter} доступен{suffix}.")
+    if resp.status_code in (401, 403):
+        return _err("Нет доступа к счётчику Метрики.")
+    detail = ""
+    try:
+        detail = str(resp.json().get("message", ""))
+    except ValueError:
+        pass
+    return _err(f"API Метрики вернул HTTP {resp.status_code}.", detail)
+
+
+def discover_yandex_metrika_counters(token: str) -> dict:
+    """Возвращает доступные токену счётчики с названием и доменом."""
+    if not token:
+        return {"ok": False, "error": "OAuth-токен не задан", "counters": []}
+    try:
+        resp = httpx.get(
+            "https://api-metrika.yandex.net/management/v1/counters",
+            params={"per_page": 1000, "status": "Active"},
+            headers={"Authorization": f"OAuth {token}"},
+            timeout=_TIMEOUT, follow_redirects=_FOLLOW,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": _describe_exc(exc), "counters": []}
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            detail = str(resp.json().get("message") or "")
+        except ValueError:
+            pass
+        return {
+            "ok": False,
+            "error": detail or f"API Метрики вернул HTTP {resp.status_code}",
+            "counters": [],
+        }
+    counters = []
+    for item in resp.json().get("counters") or []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        site = item.get("site")
+        if not site and isinstance(item.get("site2"), dict):
+            site = item["site2"].get("site")
+        counters.append({
+            "counter_id": str(item["id"]),
+            "name": str(item.get("name") or f"Счётчик {item['id']}")[:128],
+            "site": str(site or "")[:255],
+            "owner_login": str(item.get("owner_login") or "")[:128],
+            "permission": str(item.get("permission") or "")[:32],
+        })
+    return {"ok": True, "counters": counters}
 
 
 def check_calltouch() -> dict:
@@ -402,15 +486,6 @@ def check_llm() -> dict:
 _CHECKS = {
     "bitrix_box": lambda: _check_bitrix_connection(settings.bitrix_box_webhook_url),
     "bitrix_cloud": lambda: _check_bitrix_connection(settings.bitrix_cloud_webhook_url),
-    "yandex_uo": lambda: _check_yandex_account(
-        settings.yandex_uo_oauth_token, settings.yandex_uo_metrika_counter_id
-    ),
-    "yandex_csv": lambda: _check_yandex_account(
-        settings.yandex_csv_oauth_token, settings.yandex_csv_metrika_counter_id
-    ),
-    "yandex_urpase": lambda: _check_yandex_account(
-        settings.yandex_urpase_oauth_token, settings.yandex_urpase_metrika_counter_id
-    ),
     "onec": check_onec,
     "llm": check_llm,
 }

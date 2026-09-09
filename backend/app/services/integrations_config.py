@@ -191,7 +191,216 @@ FIELD_KEYS: frozenset[str] = frozenset(_FIELD_INDEX)
 _DS_KEY = "__data_source__"
 _CHECKS_KEY = "__checks__"
 _RECOMPUTE_KEY = "__recompute__"
+_YANDEX_KEY = "__yandex__"
+_YANDEX_SYNC_KEY = "__yandex_sync__"
 _FIELD_MAP_KEY = "__field_map__"
+
+_LEGAL_ENTITY_KEYS = frozenset({"uo", "csv", "urpase"})
+_LEGACY_YANDEX = (
+    ("uo", "ЮО", "yandex_uo_oauth_token", "yandex_uo_direct_login",
+     "yandex_uo_metrika_counter_id"),
+    ("csv", "ЦСВ", "yandex_csv_oauth_token", "yandex_csv_direct_login",
+     "yandex_csv_metrika_counter_id"),
+    ("urpase", "УрПАСЭ", "yandex_urpase_oauth_token", "yandex_urpase_direct_login",
+     "yandex_urpase_metrika_counter_id"),
+)
+
+
+def _legacy_yandex_config(raw: dict) -> dict:
+    """Совместимое представление прежних трёх карточек Яндекса."""
+    credentials: list[dict] = []
+    direct_accounts: list[dict] = []
+    metrika_counters: list[dict] = []
+    for key, label, token_key, login_key, counter_key in _LEGACY_YANDEX:
+        token = str(raw.get(token_key) or getattr(settings, token_key, "") or "").strip()
+        login = str(raw.get(login_key) or getattr(settings, login_key, "") or "").strip()
+        counter = str(raw.get(counter_key) or getattr(settings, counter_key, "") or "").strip()
+        if not (token or login or counter):
+            continue
+        credential_id = f"legacy-{key}"
+        credentials.append({
+            "id": credential_id, "name": f"Аккаунт {label}", "login": "",
+            "token": token, "enabled": True,
+        })
+        if login:
+            direct_accounts.append({
+                "id": f"legacy-direct-{key}", "name": f"Директ · {label}",
+                "credential_id": credential_id, "client_login": login,
+                "legal_entity_key": key, "enabled": True,
+            })
+        if counter:
+            metrika_counters.append({
+                "id": f"legacy-metrika-{key}", "name": f"Метрика · {label}",
+                "credential_id": credential_id, "counter_id": counter, "site": "",
+                "legal_entity_key": key, "enabled": True,
+            })
+    return {
+        "client_id": "", "credentials": credentials,
+        "direct_accounts": direct_accounts, "metrika_counters": metrika_counters,
+        "last_checks": {},
+    }
+
+
+def _clean_id(value: object, fallback: str) -> str:
+    text = "".join(ch for ch in str(value or "") if ch.isalnum() or ch in "-_")[:48]
+    return text or fallback
+
+
+def _normalise_yandex_config(value: object, *, existing: dict | None = None) -> dict:
+    """Валидирует динамическую конфигурацию и сохраняет замаскированные токены."""
+    source = value if isinstance(value, dict) else {}
+    old = existing if isinstance(existing, dict) else {}
+    old_tokens = {
+        str(item.get("id")): str(item.get("token") or "")
+        for item in old.get("credentials", []) if isinstance(item, dict)
+    }
+    credentials: list[dict] = []
+    credential_ids: set[str] = set()
+    for index, item in enumerate(source.get("credentials") or []):
+        if not isinstance(item, dict):
+            continue
+        item_id = _clean_id(item.get("id"), f"credential-{index + 1}")
+        if item_id in credential_ids:
+            continue
+        token = str(item.get("token") or "").strip()
+        if token.startswith("••••"):
+            token = old_tokens.get(item_id, "")
+        credentials.append({
+            "id": item_id,
+            "name": str(item.get("name") or f"OAuth-доступ {index + 1}").strip()[:128],
+            "login": str(item.get("login") or "").strip()[:128],
+            "token": token,
+            "enabled": bool(item.get("enabled", True)),
+        })
+        credential_ids.add(item_id)
+
+    def resources(key: str, *, counter: bool) -> list[dict]:
+        result: list[dict] = []
+        seen_ids: set[str] = set()
+        seen_resources: set[str] = set()
+        for index, item in enumerate(source.get(key) or []):
+            if not isinstance(item, dict):
+                continue
+            credential_id = str(item.get("credential_id") or "")
+            resource_value = str(
+                item.get("counter_id") if counter else item.get("client_login") or ""
+            ).strip()
+            if credential_id not in credential_ids or not resource_value:
+                continue
+            item_id = _clean_id(item.get("id"), f"{key}-{index + 1}")
+            # Один кабинет/счётчик нельзя учесть дважды через разные токены.
+            identity = resource_value.lower()
+            if item_id in seen_ids or identity in seen_resources:
+                continue
+            entity = str(item.get("legal_entity_key") or "")
+            common = {
+                "id": item_id,
+                "name": str(item.get("name") or resource_value).strip()[:128],
+                "credential_id": credential_id,
+                "legal_entity_key": entity if entity in _LEGAL_ENTITY_KEYS else "",
+                "enabled": bool(item.get("enabled", True)),
+            }
+            if counter:
+                common.update({"counter_id": resource_value[:32],
+                               "site": str(item.get("site") or "").strip()[:255]})
+            else:
+                common["client_login"] = resource_value[:128]
+            result.append(common)
+            seen_ids.add(item_id)
+            seen_resources.add(identity)
+        return result
+
+    checks = source.get("last_checks")
+    if not isinstance(checks, dict):
+        checks = old.get("last_checks")
+    return {
+        "client_id": str(source.get("client_id") or "").strip()[:128],
+        "credentials": credentials,
+        "direct_accounts": resources("direct_accounts", counter=False),
+        "metrika_counters": resources("metrika_counters", counter=True),
+        "last_checks": checks if isinstance(checks, dict) else {},
+    }
+
+
+async def get_yandex_config(session: AsyncSession, *, masked: bool = True) -> dict:
+    """Возвращает новую конфигурацию Яндекса; старые три карточки мигрирует на лету."""
+    row = await _load_row(session)
+    raw = row.data if row and isinstance(row.data, dict) else {}
+    stored = raw.get(_YANDEX_KEY)
+    config = _normalise_yandex_config(
+        stored if isinstance(stored, dict) else _legacy_yandex_config(raw)
+    )
+    if not masked:
+        return config
+    public = {**config, "credentials": []}
+    for item in config["credentials"]:
+        token = str(item.get("token") or "")
+        public["credentials"].append({
+            **item, "token": _masked(token), "token_filled": bool(token),
+        })
+    return public
+
+
+async def save_yandex_config(session: AsyncSession, value: dict) -> dict:
+    row = await _load_or_create_row(session)
+    data = dict(row.data) if isinstance(row.data, dict) else {}
+    existing = data.get(_YANDEX_KEY)
+    if not isinstance(existing, dict):
+        existing = _legacy_yandex_config(data)
+    clean = _normalise_yandex_config(value, existing=existing)
+    data[_YANDEX_KEY] = clean
+    row.data = data
+    await session.commit()
+    logger.info(
+        "Настройки Яндекса сохранены: доступов=%d, Direct=%d, Метрика=%d",
+        len(clean["credentials"]), len(clean["direct_accounts"]),
+        len(clean["metrika_counters"]),
+    )
+    return await get_yandex_config(session)
+
+
+async def save_yandex_checks(session: AsyncSession, checks: dict) -> None:
+    row = await _load_or_create_row(session)
+    data = dict(row.data) if isinstance(row.data, dict) else {}
+    current = data.get(_YANDEX_KEY)
+    if not isinstance(current, dict):
+        current = _legacy_yandex_config(data)
+    clean = _normalise_yandex_config(current, existing=current)
+    clean["last_checks"] = checks
+    data[_YANDEX_KEY] = clean
+    row.data = data
+    await session.commit()
+
+
+def _default_yandex_sync_status() -> dict:
+    return {
+        "state": "idle", "step": "", "started_at": None, "finished_at": None,
+        "error": None, "sources": {}, "stats": {},
+    }
+
+
+async def get_yandex_sync_status(session: AsyncSession) -> dict:
+    row = await _load_row(session)
+    if row and isinstance(row.data, dict):
+        stored = row.data.get(_YANDEX_SYNC_KEY)
+        if isinstance(stored, dict):
+            return {**_default_yandex_sync_status(), **stored}
+    return _default_yandex_sync_status()
+
+
+async def set_yandex_sync_status(session: AsyncSession, status: dict) -> None:
+    row = await _load_or_create_row(session)
+    data = dict(row.data) if isinstance(row.data, dict) else {}
+    data[_YANDEX_SYNC_KEY] = status
+    row.data = data
+    await session.commit()
+
+
+async def merge_yandex_sync_status(session: AsyncSession, patch: dict) -> dict:
+    current = await get_yandex_sync_status(session)
+    current.update(patch)
+    await set_yandex_sync_status(session, current)
+    return current
 
 # Семантические поля регламента, которые можно сопоставить с полями воронки
 # Битрикс на странице «Интеграции». enables — что даёт заполнение поля.
@@ -359,6 +568,10 @@ async def get_config(session: AsyncSession) -> dict:
 
     providers_out: list[dict] = []
     for p in PROVIDERS:
+        # Старые фиксированные карточки Яндекса заменены динамическим разделом.
+        # Поля остаются в реестре только для бесшовной миграции установок.
+        if p.key.startswith("yandex_"):
+            continue
         fields_out: list[dict] = []
         filled_count = 0
         # Необязательные поля (не влияют на признак «настроено»): доп. логин Директа,
@@ -402,6 +615,7 @@ async def get_config(session: AsyncSession) -> dict:
         "data_source": data_source,
         "ai_configured": ai_configured,
         "providers": providers_out,
+        "yandex": await get_yandex_config(session),
         "field_map": field_map,
         "field_targets": FIELD_MAP_TARGETS,
     }

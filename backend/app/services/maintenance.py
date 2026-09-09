@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.services import integrations_config as cfg
 
 logger = get_logger("lawyer.maintenance")
+_yandex_lock = threading.Lock()
 
 
 def _now() -> str:
@@ -221,6 +222,64 @@ async def _recompute_job() -> bool:
         return True
     except Exception as exc:  # noqa: BLE001 — фиксируем ошибку в статусе
         logger.exception("Пересчёт упал")
+        try:
+            await report(state="error", step="Ошибка", finished_at=_now(), error=str(exc))
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+    finally:
+        await engine.dispose()
+
+
+# ----------------------- Отдельная синхронизация Яндекса ----------------------
+
+def run_yandex_sync_blocking() -> bool:
+    """Обновляет только Direct/Метрику; параллельные запуски отбрасываются."""
+    if not _yandex_lock.acquire(blocking=False):
+        logger.info("Синхронизация Яндекса уже выполняется — повторный запуск пропущен")
+        return False
+    try:
+        return asyncio.run(_yandex_sync_job())
+    finally:
+        _yandex_lock.release()
+
+
+async def _yandex_sync_job() -> bool:
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def report(**patch: Any) -> None:
+        async with session_factory() as session:
+            await cfg.merge_yandex_sync_status(session, patch)
+
+    try:
+        await report(
+            state="running", step="Подготовка подключений Яндекса…", started_at=_now(),
+            finished_at=None, error=None, sources={}, stats={},
+        )
+
+        async def progress(step: str) -> None:
+            await report(step=step)
+
+        async with session_factory() as session:
+            await cfg.apply_overrides_from_db(session)
+            if settings.data_source != "real":
+                result = {
+                    "mode": settings.data_source,
+                    "sources": {"yandex": {"status": "skipped"}},
+                    "stats": {"reason": "Включён режим демонстрационных данных"},
+                }
+            else:
+                from app.services.yandex_sync import sync_yandex
+                result = await sync_yandex(session, progress=progress)
+        await report(
+            state="done", step="Данные Яндекса обновлены", finished_at=_now(),
+            sources=result.get("sources", {}), stats=result.get("stats", {}),
+        )
+        logger.info("Синхронизация Яндекса завершена: %s", result.get("stats"))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Синхронизация Яндекса упала")
         try:
             await report(state="error", step="Ошибка", finished_at=_now(), error=str(exc))
         except Exception:  # noqa: BLE001

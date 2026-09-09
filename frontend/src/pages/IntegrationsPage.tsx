@@ -3,6 +3,7 @@ import { App, Button, Input, Segmented, Spin } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { FieldMapSection } from "@/components/FieldMapSection";
+import { YandexSettingsSection } from "@/components/YandexSettingsSection";
 import {
   type CheckResult,
   type CheckStatus,
@@ -18,6 +19,8 @@ import {
   useRecomputeStatus,
   useSaveIntegrations,
   useStartRecompute,
+  useStartYandexSync,
+  useYandexSyncStatus,
 } from "@/api/integrations";
 
 const PROVIDER_NAMES: Record<string, string> = {
@@ -40,18 +43,21 @@ function SourcesSummary({ sources }: { sources: RecomputeStatus["sources"] }) {
   const entries = Object.entries(sources ?? {});
   if (entries.length === 0) return null;
   // Причины ошибок показываем отдельной строкой (не только в подсказке при наведении).
-  const errors = entries.filter(([, s]) => s.status === "error" && s.message);
+  const errors = entries.filter(([, s]) => ["error", "partial"].includes(s.status) && s.message);
   return (
     <>
       <div className="intg-src-summary">
         {entries.map(([key, s]) => {
-          const cls = s.status === "ok" ? "ok" : s.status === "error" ? "err" : "idle";
+          const cls = s.status === "ok" ? "ok" : s.status === "error" ? "err" : s.status === "partial" ? "warn" : "idle";
+          const sourceName = s.label || PROVIDER_NAMES[key] || key;
           const label =
             s.status === "ok"
-              ? `${PROVIDER_NAMES[key] ?? key}: ${s.count ?? "готово"}`
+              ? `${sourceName}: ${s.count ?? "готово"}`
               : s.status === "skipped"
-                ? `${PROVIDER_NAMES[key] ?? key}: не настроен`
-                : `${PROVIDER_NAMES[key] ?? key}: ошибка`;
+                ? `${sourceName}: не настроен`
+                : s.status === "partial"
+                  ? `${sourceName}: частично`
+                : `${sourceName}: ошибка${s.retained_previous ? " · сохранены прежние данные" : ""}`;
           return (
             <span key={key} className={`intg-src-chip ${cls}`} title={s.message ?? ""}>
               {label}
@@ -63,7 +69,7 @@ function SourcesSummary({ sources }: { sources: RecomputeStatus["sources"] }) {
         <div className="intg-src-errors">
           {errors.map(([key, s]) => (
             <div key={key} className="intg-src-error">
-              <b>{PROVIDER_NAMES[key] ?? key}:</b> {s.message}
+              <b>{s.label || PROVIDER_NAMES[key] || key}:</b> {s.message}
             </div>
           ))}
         </div>
@@ -144,6 +150,8 @@ export default function IntegrationsPage() {
 
   const startRecompute = useStartRecompute();
   const recomputeStatus = useRecomputeStatus();
+  const startYandexSync = useStartYandexSync();
+  const yandexSyncStatus = useYandexSyncStatus();
   const generateAi = useGenerateAi();
   const qc = useQueryClient();
 
@@ -181,6 +189,22 @@ export default function IntegrationsPage() {
     }
     prevState.current = st;
   }, [recomputeStatus.data?.state, recomputeStatus.data?.error, qc, message]);
+
+  const prevYandexState = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const st = yandexSyncStatus.data?.state;
+    if (prevYandexState.current === "running" && st && st !== "running") {
+      if (st === "done") {
+        for (const key of ["dashboard", "analytics", "romi", "ai"]) {
+          qc.invalidateQueries({ queryKey: [key] });
+        }
+        message.success("Данные Яндекс.Директа и Метрики обновлены");
+      } else if (st === "error") {
+        message.error(`Обновление Яндекса: ${yandexSyncStatus.data?.error ?? "ошибка"}`);
+      }
+    }
+    prevYandexState.current = st;
+  }, [yandexSyncStatus.data?.state, yandexSyncStatus.data?.error, qc, message]);
 
   const cfg = q.data;
 
@@ -264,6 +288,15 @@ export default function IntegrationsPage() {
     }
   };
 
+  const onYandexSync = async () => {
+    try {
+      await startYandexSync.mutateAsync();
+      await yandexSyncStatus.refetch();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
   const onGenerateAi = async () => {
     try {
       const res = await generateAi.mutateAsync();
@@ -314,7 +347,38 @@ export default function IntegrationsPage() {
           <div className="intg-maint">
             <div className="intg-maint-row">
               <div className="st">
-                <b>Пересчитать данные и обновить дашборд</b>
+                <b>Обновить Яндекс.Директ и Метрику</b>
+                <span>Загружает только рекламу и посещаемость. Bitrix24 и 1С не запускаются.</span>
+                {yandexSyncStatus.data && yandexSyncStatus.data.state !== "idle" ? (
+                  <div className={`intg-progress ${yandexSyncStatus.data.state}`}>
+                    <div className="intg-progress-head">
+                      {yandexSyncStatus.data.state === "running" ? <Spin size="small" /> : null}
+                      <span>
+                        {yandexSyncStatus.data.state === "running"
+                          ? yandexSyncStatus.data.step || "Идёт обновление Яндекса…"
+                          : yandexSyncStatus.data.state === "done"
+                            ? "Обновление Яндекса завершено"
+                            : `Ошибка: ${yandexSyncStatus.data.error ?? "неизвестно"}`}
+                      </span>
+                    </div>
+                    {yandexSyncStatus.data.state !== "running" ? (
+                      <SourcesSummary sources={yandexSyncStatus.data.sources} />
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <Button
+                type="primary"
+                onClick={onYandexSync}
+                loading={startYandexSync.isPending || yandexSyncStatus.data?.state === "running"}
+                disabled={yandexSyncStatus.data?.state === "running" || cfg.data_source !== "real"}
+              >
+                Обновить Яндекс
+              </Button>
+            </div>
+            <div className="intg-maint-row">
+              <div className="st">
+                <b>Полный перерасчёт всех источников</b>
                 <span>
                   {cfg.data_source === "real"
                     ? "Выгружает настроенные источники и пересобирает витрины по боевым интеграциям."
@@ -366,6 +430,8 @@ export default function IntegrationsPage() {
           </div>
         </div>
       </div>
+
+      <YandexSettingsSection initial={cfg.yandex} />
 
       {/* Карточки интеграций */}
       <div className="grid intg-grid">
