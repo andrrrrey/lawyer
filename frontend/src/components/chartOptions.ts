@@ -39,13 +39,60 @@ export function funnelOption(stages: FunnelStage[]): EChartsOption {
 }
 
 export function donutOption(sources: Source[]): EChartsOption {
+  const data = sources.map((c) => ({
+    value: c.leads,
+    name: c.short_name,
+    itemStyle: { color: c.color },
+  }));
   return {
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
-    legend: { bottom: 0, icon: "circle", itemWidth: 8, itemHeight: 8, textStyle: { color: "#6B7488", fontSize: 11, fontFamily: "Inter" } },
+    legend: {
+      type: "scroll",
+      orient: "vertical",
+      top: 12,
+      right: 4,
+      bottom: 12,
+      width: "48%",
+      icon: "circle",
+      itemWidth: 8,
+      itemHeight: 8,
+      itemGap: 10,
+      pageIconSize: 10,
+      pageButtonGap: 8,
+      pageTextStyle: { color: "#8A92A6", fontSize: 10, fontFamily: "Inter" },
+      tooltip: { show: true },
+      textStyle: {
+        color: "#6B7488",
+        fontSize: 11,
+        fontFamily: "Inter",
+        width: 210,
+        overflow: "truncate",
+        ellipsis: "…",
+      },
+    },
     series: [{
-      type: "pie", radius: ["52%", "74%"], center: ["50%", "44%"], avoidLabelOverlap: true,
+      type: "pie",
+      radius: ["48%", "70%"],
+      center: ["25%", "50%"],
+      avoidLabelOverlap: true,
       itemStyle: { borderColor: "#fff", borderWidth: 3, borderRadius: 5 }, label: { show: false },
-      data: sources.map((c) => ({ value: c.leads, name: c.short_name, itemStyle: { color: c.color } })),
+      data,
+    }],
+    media: [{
+      query: { maxWidth: 560 },
+      option: {
+        legend: {
+          type: "scroll",
+          orient: "horizontal",
+          left: 8,
+          right: 8,
+          top: "auto",
+          bottom: 0,
+          width: "auto",
+          textStyle: { width: 150, overflow: "truncate", ellipsis: "…" },
+        },
+        series: [{ center: ["50%", "38%"], radius: ["38%", "58%"] }],
+      },
     }],
   };
 }

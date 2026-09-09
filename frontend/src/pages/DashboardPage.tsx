@@ -63,7 +63,7 @@ export default function DashboardPage() {
           {funnel.data ? <EChart option={funnelOption(funnel.data)} height={280} /> : <Spin />}
         </ChartCard>
         <ChartCard title="Источники лидов" sub="по источнику сделки">
-          {sources.data ? <EChart option={donutOption(sources.data)} height={280} /> : <Spin />}
+          {sources.data ? <EChart option={donutOption(sources.data)} height={320} /> : <Spin />}
         </ChartCard>
       </div>
 
