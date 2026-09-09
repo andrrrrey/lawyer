@@ -99,6 +99,38 @@ def test_bitrix_call_throttles_paginated_requests(monkeypatch) -> None:
     assert pauses == [bitrix24._PAGE_PAUSE_SECONDS]
 
 
+def test_bitrix_large_list_uses_keyset_pagination(monkeypatch) -> None:
+    class FakeResponse:
+        def __init__(self, rows: list[dict]) -> None:
+            self.rows = rows
+
+        def json(self) -> dict:
+            return {"result": self.rows, "total": 999999}
+
+    first = [{"ID": str(item)} for item in range(1, 51)]
+    responses = iter([FakeResponse(first), FakeResponse([{"ID": "51"}])])
+    payloads: list[dict] = []
+
+    def fake_request(*args, **kwargs):
+        payloads.append(kwargs["json"])
+        return next(responses)
+
+    monkeypatch.setattr(bitrix24, "request", fake_request)
+    monkeypatch.setattr(bitrix24, "_base", lambda *a, **kw: "https://portal/rest/1/x")
+    monkeypatch.setattr(bitrix24.time, "sleep", lambda seconds: None)
+
+    rows = bitrix24._call_list_by_id(
+        "crm.lead.list", {"filter": {">=DATE_CREATE": "2026-06-01"}}
+    )
+
+    assert rows[0]["ID"] == "51"
+    assert rows[-1]["ID"] == "1"
+    assert payloads[0]["start"] == -1
+    assert payloads[0]["filter"][">ID"] == 0
+    assert payloads[1]["filter"][">ID"] == 50
+    assert payloads[0]["order"] == {"ID": "ASC"}
+
+
 def test_bitrix_call_does_not_hide_rest_errors(monkeypatch) -> None:
     """HTTP 200 с REST-ошибкой — это ошибка, а не пустой справочник."""
     class FakeResponse:

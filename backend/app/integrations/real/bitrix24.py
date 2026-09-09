@@ -75,6 +75,51 @@ def _call(
     return out
 
 
+def _call_list_by_id(
+    method: str, params: dict | None = None, webhook_url: str | None = None
+) -> list[dict]:
+    """Быстрая выгрузка большого списка через keyset-пагинацию по ID.
+
+    ``start=-1`` отключает дорогой подсчёт общего количества, а ``>ID`` не
+    заставляет Bitrix24 заново проходить всё более глубокое смещение.
+    """
+    out: list[dict] = []
+    last_id = 0
+    base = _base() if webhook_url is None else _base(webhook_url)
+    original = dict(params or {})
+    original_filter = dict(original.pop("filter", {}) or {})
+    with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
+        while True:
+            payload = dict(original)
+            payload["order"] = {"ID": "ASC"}
+            payload["filter"] = {**original_filter, ">ID": last_id}
+            payload["start"] = -1
+            resp = request(
+                "POST", f"{base}/{method}.json", client=client, json=payload
+            )
+            data = resp.json()
+            if isinstance(data, dict) and data.get("error"):
+                msg = data.get("error_description") or data.get("error")
+                raise RuntimeError(f"Битрикс24 отклонил {method}: {msg}")
+            rows = data.get("result", []) if isinstance(data, dict) else []
+            if not isinstance(rows, list):
+                raise RuntimeError(f"Битрикс24 вернул неожиданный ответ {method}")
+            out.extend(rows)
+            if len(rows) < _PAGE:
+                break
+            try:
+                next_id = max(int(row.get("ID") or row.get("id")) for row in rows)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"Битрикс24 не вернул ID в {method}") from exc
+            if next_id <= last_id:
+                raise RuntimeError(f"Битрикс24 зациклил пагинацию {method}")
+            last_id = next_id
+            time.sleep(_PAGE_PAUSE_SECONDS)
+    # Исторически таблица получает новые сущности первыми; сохраняем этот порядок.
+    out.reverse()
+    return out
+
+
 def _rest(method: str, payload: dict, webhook_url: str | None = None) -> Any:
     """Одиночный REST-вызов с проверкой конверта ошибки.
 
@@ -267,6 +312,11 @@ class RealBitrix24Adapter:
             return _call(method, params)
         return _call(method, params, self.webhook_url)
 
+    def _call_list_by_id(self, method: str, params: dict | None = None) -> list[dict]:
+        if self.webhook_url is None:
+            return _call_list_by_id(method, params)
+        return _call_list_by_id(method, params, self.webhook_url)
+
     def _rest(self, method: str, payload: dict) -> Any:
         if self.webhook_url is None:
             return _rest(method, payload)
@@ -301,7 +351,7 @@ class RealBitrix24Adapter:
         elif created_after:
             params["filter"] = {">=DATE_CREATE": created_after}
             params["order"] = {"DATE_CREATE": "DESC"}
-        raw = self._call("crm.deal.list", params)
+        raw = self._call_list_by_id("crm.deal.list", params)
         rows = [normalize_deal(d, extra_fields) for d in raw]
         for row in rows:
             row["crm_source"] = self.source_key
@@ -329,7 +379,10 @@ class RealBitrix24Adapter:
         elif created_after:
             params["filter"] = {">=DATE_CREATE": created_after}
             params["order"] = {"DATE_CREATE": "DESC"}
-        rows = [normalize_lead(item, extra_fields) for item in self._call("crm.lead.list", params)]
+        rows = [
+            normalize_lead(item, extra_fields)
+            for item in self._call_list_by_id("crm.lead.list", params)
+        ]
         for row in rows:
             row["crm_source"] = self.source_key
         return rows
