@@ -189,6 +189,28 @@ CHANNEL_RULES: list[tuple[tuple[str, ...], str, str]] = [
 DEFAULT_CHANNEL = ("Яндекс Директ — прочее", "#1BA9C7")
 
 
+def deduplicate_crm_rows(rows: list[dict]) -> list[dict]:
+    """Убирает повторы сущностей из постраничной выдачи Bitrix24.
+
+    При активной записи в портал одна сущность может сдвинуться между страницами
+    ``crm.*.list`` и попасть в результат дважды. Выдача запрошена от новых к
+    старым, поэтому сохраняем первое (самое свежее) вхождение.
+    """
+    result: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        external_id = str(row.get("external_id") or "").strip()
+        if not external_id:
+            result.append(row)
+            continue
+        identity = (str(row.get("entity_type") or "deal"), external_id)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(row)
+    return result
+
+
 def channel_for_campaign(campaign_name: str) -> tuple[str, str]:
     """Канал (имя, цвет) по названию кампании (по ключевым словам, регистронезависимо)."""
     low = (campaign_name or "").lower()
@@ -893,6 +915,7 @@ async def refresh_deals(session: AsyncSession, *, full: bool = False) -> dict:
                     lead_sync_failed.add(source_key)
         for item in raw:
             item["crm_source"] = source_key
+        raw = deduplicate_crm_rows(raw)
         dictionaries = await _bitrix_dictionaries(
             raw,
             adapter=adapter,
@@ -1089,6 +1112,7 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
                 source_deals.extend(lead_rows)
             for row in source_deals:
                 row["crm_source"] = source_key
+            source_deals = deduplicate_crm_rows(source_deals)
             deals.extend(source_deals)
             if sources[f"bitrix_{source_key}"]["status"] == "ok":
                 dictionaries = await _bitrix_dictionaries(

@@ -12,6 +12,17 @@ def test_channel_for_campaign() -> None:
     assert ingest.channel_for_campaign("Неизвестная")[0] == "Яндекс Директ — прочее"
 
 
+def test_deduplicate_crm_rows_keeps_first_deal_and_lead_separately() -> None:
+    rows = [
+        {"entity_type": "lead", "external_id": "42", "name": "new"},
+        {"entity_type": "lead", "external_id": "42", "name": "old"},
+        {"entity_type": "deal", "external_id": "42", "name": "deal"},
+        {"entity_type": "lead", "external_id": "", "name": "without id"},
+    ]
+
+    assert ingest.deduplicate_crm_rows(rows) == [rows[0], rows[2], rows[3]]
+
+
 def test_aggregate_channels_vat_net() -> None:
     costs = [
         {"campaign": "Поиск · Бренд", "spend_gross": 120000, "clicks": 100, "impressions": 4000},
