@@ -216,8 +216,19 @@ def test_expected_averages_and_deal_cycle_are_real() -> None:
 
 
 def test_sources_donut_follows_filters() -> None:
-    """Диаграмма источников считается по сделкам и следует фильтрам."""
+    """Диаграмма считает только лиды и не дублирует их сделками."""
     async def check(s: AsyncSession) -> None:
+        s.add_all([
+            _deal(11, days_ago=0, mgr="Иванов", src="Сайт", amount=0),
+            _deal(12, days_ago=3, mgr="Петров", src="Звонок", amount=0),
+            _deal(13, days_ago=20, mgr="Иванов", src="Сайт", amount=0),
+        ])
+        for row in s.new:
+            if isinstance(row, Deal) and row.position >= 11:
+                row.entity_type = "lead"
+                row.funnel_id = "lead"
+        await s.commit()
+
         month = {r["name"]: r["leads"] for r in await metrics.sources(s, "30")}
         assert month == {"Сайт": 2, "Звонок": 1}
 
@@ -388,8 +399,21 @@ def test_custom_period_exact_date_and_interval() -> None:
         assert len(await metrics.leads(s, period=f"date:{day(0)}")) == 1
         assert len(await metrics.leads(s, period=f"range:{day(60)}:{day(0)}")) == 4
 
-        # Диаграмма источников уважает верхнюю границу: сделка #4 (60 дней, «Сайт»)
-        # выпадает из окна 0..20, остаётся только «Сайт»×2 и «Звонок»×1.
+        # Источники считаются только по лидам: сделки из общего сида не должны
+        # попасть в диаграмму даже при подходящей дате и SOURCE_ID.
+        s.add_all([
+            _deal(21, days_ago=0, mgr="Иванов", src="Сайт", amount=0),
+            _deal(22, days_ago=3, mgr="Петров", src="Звонок", amount=0),
+            _deal(23, days_ago=20, mgr="Иванов", src="Сайт", amount=0),
+            _deal(24, days_ago=60, mgr="Петров", src="Сайт", amount=0),
+        ])
+        for row in s.new:
+            if isinstance(row, Deal) and row.position >= 21:
+                row.entity_type = "lead"
+                row.funnel_id = "lead"
+        await s.commit()
+
+        # Лид 60-дневной давности выпадает из окна 0..20.
         donut = {r["name"]: r["leads"] for r in await metrics.sources(s, f"range:{day(20)}:{day(0)}")}
         assert donut == {"Сайт": 2, "Звонок": 1}
 

@@ -688,9 +688,11 @@ async def sources(
 ) -> list[dict]:
     """Источники лидов за период.
 
-    В боевом режиме считаем по источнику сделки (SOURCE_ID Битрикс24): так
-    диаграмма охватывает все сделки, отвечает на переключатель периода и на
-    фильтры дашборда. В демо — сохранённые каналы прототипа."""
+    В боевом режиме считаем только сущности ``lead`` по их SOURCE_ID Битрикс24.
+    Сделки не добавляем: конвертированный лид обычно остаётся в CRM вместе с
+    созданной из него сделкой, и учёт обеих сущностей завышал источник вдвое.
+    В демо используются сохранённые каналы прототипа.
+    """
     if settings.data_source != "real":
         chs = (await session.execute(select(Channel).order_by(Channel.position))).scalars().all()
         return [
@@ -699,7 +701,12 @@ async def sources(
             for c in chs
         ]
 
-    deals = await period_deals(session, period, mgr, source, legal_entity, funnel)
+    deals = [
+        row for row in await period_deals(
+            session, period, mgr, source, legal_entity, funnel
+        )
+        if row.entity_type == "lead"
+    ]
     counts: dict[str, int] = {}
     for d in deals:
         counts[d.src or "—"] = counts.get(d.src or "—", 0) + 1
