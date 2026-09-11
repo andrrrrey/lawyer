@@ -439,12 +439,16 @@ async def kpis(
 
     out: list[dict] = []
     for c in cards:
+        # Себестоимость услуг не поступает: не показываем фиктивную карточку,
+        # в которой «маржа» была равна фактической выручке 1С.
+        if real and c.key == "margin":
+            continue
         value: float | None = None
         if c.static_value is not None:
             if real:
                 # Не показываем демо-строку: считаем ROMI из каналов, иначе «—».
                 r = romi_svc.romi(
-                    sum(int(ch["margin"] or 0) for ch in channels_rows),
+                    sum(int(ch["revenue"] or 0) for ch in channels_rows),
                     sum(int(ch["spend"] or 0) for ch in channels_rows),
                 ) if c.key == "romi" else None
                 display = f"{r:+d}%" if r is not None else "—"
@@ -781,7 +785,8 @@ async def romi_by_channel(
     chs = await _period_channels(session, period, mgr, source, legal_entity, funnel)
     out = []
     for c in chs:
-        r = f.romi_of(c["spend"], c["margin"])
+        basis = c["revenue"] if settings.data_source == "real" else c["margin"]
+        r = f.romi_of(c["spend"], basis)
         if r is not None:
             out.append({"name": c["name"], "short_name": f.short_channel(c["name"]), "romi": r})
     return out

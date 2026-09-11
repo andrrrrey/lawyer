@@ -82,15 +82,17 @@ def _row(name: str, spend: int | None, leads: int, deals: int, payments: int,
     static=False — цифры реальные (пересобраны за период): рекомендуемое действие
     считается из фактического ROMI, а не берётся из сидовых подписей ACTIONS.
     """
+    # В демо сохраняем исторические числа прототипа. В боевом режиме
+    # окупаемость считается по фактической выручке 1С: себестоимость услуг не приходит.
+    romi_basis = margin if static else revenue
     return {
         "name": name, "spend": spend,
         "spend_display": (f.money(spend) if spend else "—") if campaign
                          else _spend_display(spend),
         "leads": leads, "deals": deals, "payments": payments,
         "revenue": revenue, "revenue_display": f.money(revenue),
-        "margin": margin, "margin_display": f.money(margin),
-        "romi": f.romi_tag(spend, margin),
-        "action": f.action_of(name, spend, margin, static=static),
+        "romi": f.romi_tag(spend, romi_basis),
+        "action": f.action_of(name, spend, romi_basis, static=static),
     }
 
 
@@ -161,7 +163,7 @@ async def _chart_channels(
     return [
         {
             "name": c.name, "color": c.color, "spend": c.spend,
-            "margin": c.margin, "campaigns": [
+            "revenue": c.revenue, "margin": c.margin, "campaigns": [
                 {
                     "name": k.name, "spend": k.spend, "margin": k.margin,
                     "revenue": k.revenue,
@@ -176,11 +178,11 @@ async def _chart_channels(
 async def romi_channels_chart(
     session: AsyncSession, period: str = "30", legal_entity: str = "all"
 ) -> list[dict]:
-    """Данные для сравнения расхода и маржи по каналам (chart-romi2)."""
+    """Данные для сравнения расхода и фактической выручки по каналам."""
     chs = await _chart_channels(session, period, legal_entity)
     return [
         {"name": c["name"], "short_name": f.short_channel(c["name"]),
-         "spend": c["spend"], "margin": c["margin"], "color": c["color"]}
+         "spend": c["spend"], "revenue": c["revenue"], "color": c["color"]}
         for c in chs
     ]
 
@@ -195,7 +197,10 @@ async def campaigns_bubble(
         for k in c["campaigns"]:
             out.append({
                 "name": k["name"], "spend": k["spend"],
-                "romi": f.romi_of(k["spend"], k["margin"]),
+                "romi": f.romi_of(
+                    k["spend"],
+                    k["revenue"] if settings.data_source == "real" else k["margin"],
+                ),
                 "revenue": k["revenue"], "color": c["color"],
             })
     return out

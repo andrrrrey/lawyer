@@ -75,7 +75,7 @@ export default function DashboardPage() {
             <EmptyState title="Расходов пока нет" hint="Данные Яндекс Директа появятся после подключения. Остальные статьи можно добавить вручную в разделе «Настройки → Расходы»." />
           )}
         </ChartCard>
-        <ChartCard title="ROMI по каналам" sub="фактические поступления 1С против рекламных расходов">
+        <ChartCard title="ROMI по выручке" sub="фактические поступления 1С против рекламных расходов">
           {!romi.data ? <Spin /> : romi.data.length ? (
             <EChart option={romiBarOption(romi.data)} height={260} />
           ) : (

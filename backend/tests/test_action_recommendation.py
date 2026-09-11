@@ -14,14 +14,14 @@ from app.services import format as f
 def test_seed_named_channel_uses_real_romi_when_not_static() -> None:
     # «Яндекс Директ — Поиск» есть в ACTIONS со статичной подписью «Масштабировать»,
     # но при расходе без выручки (ROMI −100%) боевой режим обязан звать ограничить.
-    a = f.action_of("Яндекс Директ — Поиск", spend=36_769, margin=0, static=False)
+    a = f.action_of("Яндекс Директ — Поиск", spend=36_769, revenue=0, static=False)
     assert a["label"] == "Ограничить"
     assert a["cls"] == "act-limit"
 
 
 def test_seed_named_channel_keeps_static_label_in_demo() -> None:
     # Демо-режим (static=True) сохраняет заранее написанную подпись прототипа.
-    a = f.action_of("Яндекс Директ — Поиск", spend=214_000, margin=742_000, static=True)
+    a = f.action_of("Яндекс Директ — Поиск", spend=214_000, revenue=742_000, static=True)
     assert a["label"] == "Масштабировать"
 
 

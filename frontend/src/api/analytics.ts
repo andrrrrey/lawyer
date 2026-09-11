@@ -15,7 +15,7 @@ export interface Action { label: string; cls: string; note: string; }
 export interface Campaign {
   name: string; spend: number | null; spend_display: string;
   leads: number; deals: number; payments: number;
-  revenue: number; revenue_display: string; margin: number; margin_display: string;
+  revenue: number; revenue_display: string;
   romi: RomiTag; action: Action;
 }
 export interface ChannelRow extends Omit<Campaign, "name"> {

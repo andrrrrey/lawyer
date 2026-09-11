@@ -6,7 +6,7 @@ import {
 } from "@/api/romi";
 import { EChart } from "@/components/EChart";
 import { EmptyState } from "@/components/EmptyState";
-import { bubbleOption, romiSpendMarginOption } from "@/components/chartOptions";
+import { bubbleOption, romiSpendRevenueOption } from "@/components/chartOptions";
 import { useFilters } from "@/state/filters";
 
 const MS_STATUS: Record<string, [string, string]> = {
@@ -90,15 +90,23 @@ export default function RomiPage() {
     <>
       <div className="grid two-b">
         <div className="card">
-          <div className="card-h"><h3>ROMI по каналам</h3><span className="sub">маржа против расхода</span></div>
+          <div className="card-h"><h3>ROMI по выручке</h3><span className="sub">выручка по 1С против рекламного расхода</span></div>
           <div className="card-p">
-            {romiCh.data ? <EChart option={romiSpendMarginOption(romiCh.data)} height={300} /> : <Spin />}
+            {!romiCh.data ? <Spin /> : romiCh.data.length ? (
+              <EChart option={romiSpendRevenueOption(romiCh.data)} height={300} />
+            ) : (
+              <EmptyState title="ROMI пока не рассчитан" hint="Добавьте кабинеты Директа, обновите Яндекс и свяжите поступления 1С со сделками Bitrix24." />
+            )}
           </div>
         </div>
         <div className="card">
           <div className="card-h"><h3>Эффективность кампаний</h3><span className="sub">размер точки — выручка</span></div>
           <div className="card-p">
-            {bubble.data ? <EChart option={bubbleOption(bubble.data)} height={300} /> : <Spin />}
+            {!bubble.data ? <Spin /> : bubble.data.length ? (
+              <EChart option={bubbleOption(bubble.data)} height={300} />
+            ) : (
+              <EmptyState title="Нет данных по кампаниям" hint="Кампании появятся после успешной загрузки кабинетов Яндекс Директа." />
+            )}
           </div>
         </div>
       </div>
@@ -108,7 +116,7 @@ export default function RomiPage() {
         <div className="card" style={{ marginTop: 12 }}>
           <EmptyState
             title="Рекомендаций пока нет"
-            hint="Рекомендации по бюджету формирует AI-слой по данным Директа и фактическим поступлениям 1С. Подключите интеграции, выполните пересчёт и нажмите «Сгенерировать AI» на странице «Интеграции»."
+            hint="Сначала добавьте кабинеты Директа и нажмите «Обновить Яндекс». AI-рекомендации дополнительно требуют настроенной AI-интеграции."
           />
         </div>
       ) : (
@@ -124,7 +132,7 @@ export default function RomiPage() {
         {mw.data && mw.data.items.length === 0 ? (
           <EmptyState
             title="Нет кандидатов в минус-слова"
-            hint="Список формируется из отчёта по поисковым запросам Яндекс Директа. Подключите Директ и выполните пересчёт."
+            hint="Список формируется из отчёта по поисковым запросам. Добавьте кабинет Директа и нажмите «Обновить Яндекс»."
           />
         ) : (
         <>

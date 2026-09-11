@@ -3,7 +3,7 @@ import type { ChainStep } from "@/api/analytics";
 const ARROW =
   '<path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/>';
 
-// Цепочка «реклама → визит → сделка → оплата → маржа» (перенос из прототипа).
+// Цепочка «реклама → визит → сделка → оплата → выручка».
 export function ChainView({ steps }: { steps: ChainStep[] }) {
   return (
     <div className="chain">

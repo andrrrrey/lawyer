@@ -27,6 +27,7 @@ from app.models import (
     AdCost,
     BusinessSettings,
     Deal,
+    KpiCard,
     ManualExpense,
     OneCReceipt,
     StageHistory,
@@ -345,6 +346,8 @@ def test_channels_table_follows_period() -> None:
         month = await analytics.channels_table(s, period="30")
         assert len(month) == 1
         assert month[0]["name"] == "Яндекс Директ — Поиск"
+        assert "margin" not in month[0]
+        assert "margin_display" not in month[0]
         assert month[0]["spend"] == 6_000   # 1000 + 2000 + 3000
         # Дневные строки одной кампании свёрнуты в одну строку таблицы.
         assert len(month[0]["campaigns"]) == 1
@@ -357,6 +360,24 @@ def test_channels_table_follows_period() -> None:
         quarter = await analytics.channels_table(s, period="quarter")
         assert quarter[0]["spend"] == 10_000
         assert quarter[0]["leads"] == 4
+
+    with_real_data(check)
+
+
+def test_real_kpis_do_not_show_fake_margin() -> None:
+    """Без источника себестоимости боевой дашборд не называет выручку маржой."""
+    async def check(s: AsyncSession) -> None:
+        s.add_all([
+            KpiCard(position=1, key="revenue", label="Выручка", kind="money",
+                    base_key="revenue"),
+            KpiCard(position=2, key="margin", label="Маржа", kind="money",
+                    base_key="margin"),
+        ])
+        await s.commit()
+        rows = await metrics.kpis(s, period="30")
+        keys = {row["key"] for row in rows}
+        assert "margin" not in keys
+        assert "revenue" in keys
 
     with_real_data(check)
 

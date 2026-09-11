@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "./client";
 
 export interface RomiChannelChart {
-  name: string; short_name: string; spend: number | null; margin: number; color: string;
+  name: string; short_name: string; spend: number | null; revenue: number; color: string;
 }
 export interface CampaignBubble {
   name: string; spend: number | null; romi: number | null; revenue: number; color: string;

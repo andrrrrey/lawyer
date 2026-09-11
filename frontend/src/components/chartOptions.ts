@@ -124,11 +124,6 @@ export function revenueOption(s: RevenueSeries): EChartsOption {
         lineStyle: { width: 2.5, color: "#635BFF" },
         areaStyle: { color: vGradient("rgba(99,91,255,.22)", "rgba(99,91,255,0)") },
       },
-      {
-        name: "Маржа", type: "line", smooth: true, data: s.margin, symbol: "none",
-        lineStyle: { width: 2.5, color: "#12B76A" },
-        areaStyle: { color: vGradient("rgba(18,183,106,.18)", "rgba(18,183,106,0)") },
-      },
     ],
   };
 }
@@ -163,7 +158,7 @@ export function expensesBarOption(rows: ExpenseByArticle[]): EChartsOption {
   };
 }
 
-export function romiSpendMarginOption(rows: RomiChannelChart[]): EChartsOption {
+export function romiSpendRevenueOption(rows: RomiChannelChart[]): EChartsOption {
   return {
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, valueFormatter: (v) => rub(v as number) },
     legend: { top: 0, right: 0, icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: { color: "#6B7488", fontSize: 11 } },
@@ -172,7 +167,7 @@ export function romiSpendMarginOption(rows: RomiChannelChart[]): EChartsOption {
     yAxis: { type: "value", ...AXIS, ...SPLIT, axisLabel: { color: "#8A92A6", fontSize: 11, formatter: (v: number) => v / 1e3 + "k" } },
     series: [
       { name: "Расход", type: "bar", barWidth: "28%", data: rows.map((d) => d.spend), itemStyle: { color: "#E0803B", borderRadius: [5, 5, 0, 0], opacity: 0.85 } },
-      { name: "Маржа", type: "bar", barWidth: "28%", data: rows.map((d) => ({ value: d.margin, itemStyle: { color: "#12B76A", borderRadius: [5, 5, 0, 0] } })) },
+      { name: "Выручка по 1С", type: "bar", barWidth: "28%", data: rows.map((d) => ({ value: d.revenue, itemStyle: { color: "#12B76A", borderRadius: [5, 5, 0, 0] } })) },
     ],
   };
 }

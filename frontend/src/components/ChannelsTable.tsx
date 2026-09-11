@@ -23,7 +23,6 @@ function CampaignRow({ k }: { k: Campaign }) {
       <td className="num">{k.deals}</td>
       <td className="num">{k.payments}</td>
       <td className="num money">{k.revenue_display}</td>
-      <td className="num money" style={{ color: "var(--green)" }}>{k.margin_display}</td>
       <td><RomiCell romi={k.romi} /></td>
       <td><ActionCell action={k.action} /></td>
     </tr>
@@ -47,7 +46,7 @@ export function ChannelsTable({ rows }: { rows: ChannelRow[] }) {
           <tr>
             <th />
             <th className="cell-cmp">Канал / кампания</th><th>Расход</th><th>Лиды</th><th>Сделки</th><th>Оплаты</th>
-            <th>Выручка</th><th>Маржа</th><th>ROMI</th><th>Действие</th>
+            <th>Выручка по 1С</th><th>ROMI по выручке</th><th>Действие</th>
           </tr>
         </thead>
         <tbody>
@@ -71,7 +70,6 @@ export function ChannelsTable({ rows }: { rows: ChannelRow[] }) {
                   <td className="num">{c.deals}</td>
                   <td className="num">{c.payments}</td>
                   <td className="num money">{c.revenue_display}</td>
-                  <td className="num money" style={{ color: "var(--green)" }}>{c.margin_display}</td>
                   <td><RomiCell romi={c.romi} /></td>
                   <td><ActionCell action={c.action} /></td>
                 </tr>

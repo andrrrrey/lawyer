@@ -353,10 +353,9 @@ def budget_recs_from_channels(channels: list[dict]) -> list[dict]:
         spend = int(ch.get("spend") or 0)
         if spend <= 0:
             continue
-        margin = int(ch.get("margin") or 0)
         revenue = int(ch.get("revenue") or 0)
         payments = int(ch.get("payments") or 0)
-        r = romi.romi(margin, spend)
+        r = romi.romi(revenue, spend)
         if r is None:
             continue
         if r >= 200:
@@ -383,8 +382,8 @@ def budget_recs_from_channels(channels: list[dict]) -> list[dict]:
             "impact": (f"− до {f.money(spend)}/мес" if key == "limit"
                        else "потенциал роста выручки" if key == "scale" else ""),
             "src": ["Яндекс Директ", "1С"], "conf": "высокая",
-            # Маржа == выручка → себестоимость не сопоставлена (маржа неточная).
-            "dep": margin == revenue,
+            # Без связанной оплаты рекомендация основана только на расходе.
+            "dep": payments == 0,
         })
     recs.sort(key=lambda x: rec_style.TAG_ORDER.get(x["tag_class"], 9))
     return recs

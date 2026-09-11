@@ -27,7 +27,7 @@ async def _analytics_summary(session: AsyncSession) -> dict:
     baselines = (await session.execute(select(Baseline))).scalars().all()
     return {
         "channels": [
-            {"name": c.name, "spend": c.spend, "revenue": c.revenue, "margin": c.margin,
+            {"name": c.name, "spend": c.spend, "revenue": c.revenue,
              "leads": c.leads, "deals": c.deals, "payments": c.payments}
             for c in channels
         ],

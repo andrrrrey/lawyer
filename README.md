@@ -112,6 +112,6 @@ cd frontend && npm install && npm run build
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — развёртывание на VPS (домен, HTTPS)
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — API-ключи: где взять и куда вносить
 - [docs/ADMIN.md](docs/ADMIN.md) — эксплуатация (бэкапы, логи, обновление)
-- [docs/ROMI_METHODOLOGY.md](docs/ROMI_METHODOLOGY.md) — методика ROMI/маржи/НДС
+- [docs/ROMI_METHODOLOGY.md](docs/ROMI_METHODOLOGY.md) — методика ROMI по выручке и НДС
 - [docs/DB_SCHEMA.md](docs/DB_SCHEMA.md) — схема базы данных
 - [docs/ACCEPTANCE_CHECKLIST.md](docs/ACCEPTANCE_CHECKLIST.md) — чек-лист приёмки

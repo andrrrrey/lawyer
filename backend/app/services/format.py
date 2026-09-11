@@ -30,26 +30,26 @@ def short_channel(name: str) -> str:
     return name.replace("Яндекс Директ — ", "ЯД · ")
 
 
-def romi_of(spend: int | None, margin: int) -> int | None:
-    """ROMI, %. None — если источник расхода не подключён или канал бесплатный."""
+def romi_of(spend: int | None, revenue: int) -> int | None:
+    """ROMI по выручке, %. None — если расход не подключён или равен нулю."""
     if spend is not None and spend > 0:
-        return round((margin - spend) / spend * 100)
+        return round((revenue - spend) / spend * 100)
     return None
 
 
-def romi_tag(spend: int | None, margin: int) -> dict:
+def romi_tag(spend: int | None, revenue: int) -> dict:
     """Метка ROMI: {display, cls, value}."""
     if spend is None:
         return {"display": "нет данных", "cls": "t-gray", "value": None}
     if spend == 0:
         return {"display": "бесплатный канал", "cls": "t-gray", "value": None}
-    r = romi_of(spend, margin)
+    r = romi_of(spend, revenue)
     assert r is not None
     cls = "t-green" if r >= 200 else "t-amber" if r >= 80 else "t-red"
     return {"display": f"{'+' if r > 0 else ''}{r}%", "cls": cls, "value": r}
 
 
-def action_of(name: str, spend: int | None, margin: int, *, static: bool = True) -> dict:
+def action_of(name: str, spend: int | None, revenue: int, *, static: bool = True) -> dict:
     """Рекомендуемое действие: {label, cls, note} (перенос actionOf/ACTIONS).
 
     static=True — демо-режим: для сидовых каналов берётся заранее написанная
@@ -65,7 +65,7 @@ def action_of(name: str, spend: int | None, margin: int, *, static: bool = True)
     elif spend == 0:
         label, cls, note = "—", "act-none", "Бесплатный канал"
     else:
-        r = romi_of(spend, margin) or 0
+        r = romi_of(spend, revenue) or 0
         if r >= 200:
             label, cls, note = "Масштабировать", "act-scale", "Высокий ROMI"
         elif r >= 120:
