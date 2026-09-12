@@ -50,6 +50,26 @@ def _crm_type(value: Any) -> str:
     return text
 
 
+def _crm_link(raw: dict, order: dict, counterparty: dict) -> tuple[str, str]:
+    """Возвращает связанную сущность Bitrix24, отдавая приоритет заказу 1С.
+
+    Контрагент часто связан с компанией Bitrix24, а поступление относится к сделке
+    через документ «Заказ покупателя». Поэтому нельзя независимо выбирать первый
+    Код_BTX/Тип_BTX из контрагента: такая пара навсегда оставляет оплату без сделки.
+    Прямые поля и связь контрагента сохранены как совместимость со старым JSON.
+    """
+    candidates = (order, raw, counterparty)
+    for source in candidates:
+        code = str(_first(source, "Код_BTX", "code_btx", "crmExternalId")).strip()
+        if not code:
+            continue
+        entity_type = _crm_type(
+            _first(source, "Тип_BTX", "type_btx", "crmEntityType")
+        )
+        return code, entity_type
+    return "", ""
+
+
 def normalize_receipt(raw: dict) -> dict:
     """Нормализует русские и технические имена полей ответа 1С."""
     registrar = _object(raw, "Регистратор", "registrar")
@@ -58,6 +78,7 @@ def normalize_receipt(raw: dict) -> dict:
     contract = _object(raw, "Договор", "contract")
     article = _object(raw, "СтатьяДДС", "article")
     order = _object(raw, "Заказ", "order")
+    crm_external_id, crm_entity_type = _crm_link(raw, order, counterparty)
     return {
         "registrar_id": str(
             _first(
@@ -198,32 +219,8 @@ def normalize_receipt(raw: dict) -> dict:
         ).strip(),
         "amount": _money(_first(raw, "amount", "Сумма", "sum")),
         "currency": str(_first(raw, "currency", "Валюта", default="RUB")),
-        "crm_external_id": str(
-            _first(
-                counterparty,
-                "Код_BTX",
-                "code_btx",
-                default=_first(
-                    order,
-                    "Код_BTX",
-                    "code_btx",
-                    default=_first(raw, "Код_BTX", "code_btx", "crmExternalId"),
-                ),
-            )
-        ),
-        "crm_entity_type": _crm_type(
-            _first(
-                counterparty,
-                "Тип_BTX",
-                "type_btx",
-                default=_first(
-                    order,
-                    "Тип_BTX",
-                    "type_btx",
-                    default=_first(raw, "Тип_BTX", "type_btx", "crmEntityType"),
-                ),
-            )
-        ),
+        "crm_external_id": crm_external_id,
+        "crm_entity_type": crm_entity_type,
         "row_number": str(_first(raw, "НомерСтроки", "row_number", "rowNumber")),
         "raw": raw,
     }

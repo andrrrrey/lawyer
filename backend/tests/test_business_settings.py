@@ -145,6 +145,18 @@ def test_onec_nested_payload_from_specification_is_normalized() -> None:
     }
 
 
+def test_onec_order_deal_has_priority_over_counterparty_company() -> None:
+    """Оплата связывается со сделкой заказа, а не с компанией контрагента."""
+    row = normalize_receipt({
+        "Контрагент": {"Код_BTX": "company-77", "Тип_BTX": "company"},
+        "Заказ": {"Код_BTX": "deal-991", "Тип_BTX": "deal"},
+        "Сумма": 1000,
+    })
+
+    assert row["crm_external_id"] == "deal-991"
+    assert row["crm_entity_type"] == "deal"
+
+
 def test_receipts_exclude_internal_transfer_and_unknown_article() -> None:
     data = deepcopy(BUSINESS_SETTINGS)
     data["legal_entities"][0]["inn"] = "1000000001"
