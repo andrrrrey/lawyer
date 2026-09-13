@@ -12,6 +12,12 @@ class MockBitrix24Adapter:
     ) -> list[dict]:
         return [dict(row) for row in ALL_DEALS]
 
+    def fetch_deals_by_ids(
+        self, deal_ids: list[str], extra_fields: dict | None = None,  # noqa: ARG002
+    ) -> list[dict]:
+        wanted = {str(item) for item in deal_ids}
+        return [dict(row) for row in ALL_DEALS if str(row.get("external_id")) in wanted]
+
     def fetch_deal_fields(self) -> list[dict]:
         return []
 

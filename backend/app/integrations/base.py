@@ -28,6 +28,9 @@ class Bitrix24Adapter(Protocol):
         self, created_after: str | None = None, extra_fields: dict[str, str] | None = None,
         modified_after: str | None = None,
     ) -> list[dict]: ...
+    def fetch_deals_by_ids(
+        self, deal_ids: list[str], extra_fields: dict[str, str] | None = None,
+    ) -> list[dict]: ...
     def fetch_leads(
         self, created_after: str | None = None, extra_fields: dict[str, str] | None = None,
         modified_after: str | None = None,

@@ -148,6 +148,26 @@ def test_bitrix_call_does_not_hide_rest_errors(monkeypatch) -> None:
         bitrix24._call("user.get", {})
 
 
+def test_bitrix_fetch_deals_by_ids_uses_batched_id_filter(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    def fake_call(method: str, params: dict | None = None) -> list[dict]:
+        calls.append((method, params or {}))
+        return [{"ID": item, "TITLE": f"Сделка {item}"}
+                for item in (params or {}).get("filter", {}).get("@ID", [])]
+
+    adapter = bitrix24.RealBitrix24Adapter(source_key="cloud")
+    monkeypatch.setattr(adapter, "_call", fake_call)
+    rows = adapter.fetch_deals_by_ids([str(item) for item in range(1, 53)])
+
+    assert len(calls) == 2
+    assert calls[0][0] == "crm.deal.list"
+    assert len(calls[0][1]["filter"]["@ID"]) == 50
+    assert calls[1][1]["filter"]["@ID"] == ["51", "52"]
+    assert len(rows) == 52
+    assert all(row["crm_source"] == "cloud" for row in rows)
+
+
 def test_onec_uses_post_with_iso_period_body(monkeypatch) -> None:
     calls: list[tuple[str, str, dict]] = []
 

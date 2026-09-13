@@ -23,6 +23,12 @@ logger = get_logger("lawyer.integrations")
 _PAGE = 50
 _PAGE_PAUSE_SECONDS = 0.6
 
+_DEAL_SELECT = [
+    "ID", "TITLE", "CATEGORY_ID", "STAGE_ID", "STAGE_SEMANTIC_ID", "ASSIGNED_BY_ID",
+    "CONTACT_ID", "SOURCE_ID", "OPPORTUNITY", "DATE_CREATE", "DATE_MODIFY",
+    "LAST_ACTIVITY_TIME", "UTM_SOURCE", "UTM_CAMPAIGN",
+]
+
 
 def _base(webhook_url: str | None = None) -> str:
     url = webhook_url if webhook_url is not None else settings.bitrix24_webhook_url
@@ -335,11 +341,7 @@ class RealBitrix24Adapter:
         modified_after — только изменённые с указанного момента: короткая выборка
         для частой синхронизации, чтобы не тянуть всё окно каждые несколько минут.
         """
-        select = [
-            "ID", "TITLE", "CATEGORY_ID", "STAGE_ID", "STAGE_SEMANTIC_ID", "ASSIGNED_BY_ID",
-            "CONTACT_ID", "SOURCE_ID", "OPPORTUNITY", "DATE_CREATE", "DATE_MODIFY",
-            "LAST_ACTIVITY_TIME", "UTM_SOURCE", "UTM_CAMPAIGN",
-        ]
+        select = list(_DEAL_SELECT)
         # Добавляем сопоставленные пользовательские поля в выборку.
         select += [c for c in {v for v in (extra_fields or {}).values() if v} if c not in select]
         params: dict[str, Any] = {"select": select}
@@ -353,6 +355,32 @@ class RealBitrix24Adapter:
             params["order"] = {"DATE_CREATE": "DESC"}
         raw = self._call_list_by_id("crm.deal.list", params)
         rows = [normalize_deal(d, extra_fields) for d in raw]
+        for row in rows:
+            row["crm_source"] = self.source_key
+        return rows
+
+    def fetch_deals_by_ids(
+        self, deal_ids: list[str], extra_fields: dict[str, str] | None = None,
+    ) -> list[dict]:
+        """Точечно загружает сделки, на которые ссылаются поступления 1С.
+
+        ID отправляются пакетами по 50, поэтому backfill старых оплат не запускает
+        повторную выгрузку всей истории портала.
+        """
+        wanted = list(dict.fromkeys(str(item).strip() for item in deal_ids if str(item).strip()))
+        select = list(_DEAL_SELECT)
+        select += [
+            code for code in {value for value in (extra_fields or {}).values() if value}
+            if code not in select
+        ]
+        raw: list[dict] = []
+        for index in range(0, len(wanted), _PAGE):
+            raw.extend(self._call("crm.deal.list", {
+                "filter": {"@ID": wanted[index:index + _PAGE]},
+                "select": select,
+                "order": {"ID": "ASC"},
+            }))
+        rows = [normalize_deal(item, extra_fields) for item in raw]
         for row in rows:
             row["crm_source"] = self.source_key
         return rows
