@@ -70,6 +70,25 @@ def test_employee_names_are_scoped_by_bitrix_connection() -> None:
     assert employee_names_for_source(data, "cloud") == {"12": "Пётр Петров"}
 
 
+def test_duplicate_bitrix_employee_assignment_is_rejected() -> None:
+    data = deepcopy(BUSINESS_SETTINGS)
+    data["employees"] = [
+        {
+            "key": "employee_1", "name": "Иван Иванов", "crm_source": "box",
+            "bitrix_user_id": "12", "legal_entity_key": "uo",
+            "department_key": "", "enabled": True,
+        },
+        {
+            "key": "employee_2", "name": "Иван Иванов", "crm_source": "box",
+            "bitrix_user_id": "12", "legal_entity_key": "uo",
+            "department_key": "", "enabled": True,
+        },
+    ]
+
+    with pytest.raises(ValueError, match="добавлен в структуру повторно"):
+        validate_settings(data)
+
+
 def test_onec_payload_normalization_preserves_money_and_btx_fields() -> None:
     rows = parse_receipts({"result": [{
         "РегистраторУИД": "reg-1",
@@ -216,6 +235,20 @@ def test_bitrix_funnels_api_lists_both_connections(client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "bitrix_box_webhook_url", "")
     monkeypatch.setattr(settings, "bitrix_cloud_webhook_url", "")
     response = client.get("/api/integrations/bitrix/funnels")
+
+    assert response.status_code == 200
+    assert [(item["key"], item["configured"]) for item in response.json()["sources"]] == [
+        ("box", False),
+        ("cloud", False),
+    ]
+
+
+def test_bitrix_users_api_lists_both_connections(client, monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "bitrix_box_webhook_url", "")
+    monkeypatch.setattr(settings, "bitrix_cloud_webhook_url", "")
+    response = client.get("/api/integrations/bitrix/users")
 
     assert response.status_code == 200
     assert [(item["key"], item["configured"]) for item in response.json()["sources"]] == [

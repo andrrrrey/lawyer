@@ -118,11 +118,23 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Тип воронки должен быть deal или lead")
         funnel["entity_type"] = entity_type
 
+    employee_identities: set[tuple[str, str]] = set()
     for employee in employees:
         crm_source = str(employee.get("crm_source", "")).strip()
-        if crm_source and crm_source not in source_keys:
+        if not crm_source:
+            raise ValueError("Выберите сотрудника из Bitrix24")
+        if crm_source not in source_keys:
             raise ValueError("Сотрудник ссылается на неизвестный источник Bitrix24")
         employee["crm_source"] = crm_source
+        user_id = str(employee.get("bitrix_user_id", "")).strip()
+        if not user_id:
+            raise ValueError("Выберите сотрудника из Bitrix24")
+        identity = (crm_source, user_id)
+        if identity in employee_identities:
+            raise ValueError("Сотрудник Bitrix24 добавлен в структуру повторно")
+        employee_identities.add(identity)
+        employee["bitrix_user_id"] = user_id
+        employee["name"] = _required_text(employee.get("name"), "Имя сотрудника")
         entity_key = str(employee.get("legal_entity_key", ""))
         if entity_key and entity_key not in entity_keys:
             raise ValueError("Сотрудник ссылается на неизвестное юридическое лицо")
@@ -196,10 +208,9 @@ def configured_funnel_condition(data: dict[str, Any]):
 
 
 def employee_names_for_source(data: dict[str, Any], crm_source: str) -> dict[str, str]:
-    """Ручной справочник ID → ФИО для портала Bitrix24.
+    """Сохранённые назначения ID → ФИО для портала Bitrix24.
 
-    Используется как fallback, когда вебхуку не выдан минимальный scope
-    ``user_brief`` и метод ``user.get`` недоступен.
+    Используется как fallback, когда метод ``user.get`` временно недоступен.
     """
     result: dict[str, str] = {}
     for employee in data.get("employees", []):

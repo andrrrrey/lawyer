@@ -6,10 +6,12 @@ import { useSearchParams } from "react-router-dom";
 import {
   type BusinessSettings,
   type BitrixFunnelOption,
+  type BitrixUserOption,
   type DdsArticle,
   type Funnel,
   type Plan,
   useBitrixFunnels,
+  useBitrixUsers,
   useBusinessSettings,
   useCreateManualExpense,
   useDeleteManualExpense,
@@ -31,11 +33,10 @@ function Card({ title, subtitle, children }: React.PropsWithChildren<{ title: st
   );
 }
 
-const inputStyle = { minWidth: 150 };
-
 export default function BusinessSettingsPage() {
   const query = useBusinessSettings();
   const bitrixFunnels = useBitrixFunnels();
+  const bitrixUsers = useBitrixUsers();
   const save = useSaveBusinessSettings();
   const receipts = useOneCReceiptJournal();
   const expenses = useManualExpenses();
@@ -54,6 +55,32 @@ export default function BusinessSettingsPage() {
     () => !!draft && !!query.data && JSON.stringify(draft) !== JSON.stringify(query.data),
     [draft, query.data],
   );
+  const bitrixPeople = useMemo(() => {
+    const people = new Map<string, BitrixUserOption & { source_key: string; source_name: string }>();
+    for (const source of bitrixUsers.data?.sources ?? []) {
+      for (const user of source.users) {
+        people.set(`${source.key}:${user.id}`, {
+          ...user, source_key: source.key, source_name: source.name,
+        });
+      }
+    }
+    // Сохранённые назначения остаются доступными, даже если user.get временно
+    // недоступен или сотрудник уже деактивирован в Bitrix24.
+    for (const employee of draft?.employees ?? []) {
+      const identity = `${employee.crm_source}:${employee.bitrix_user_id}`;
+      if (!people.has(identity) && employee.crm_source && employee.bitrix_user_id) {
+        people.set(identity, {
+          id: employee.bitrix_user_id,
+          name: employee.name,
+          active: null,
+          legal_entity_keys: employee.legal_entity_key ? [employee.legal_entity_key] : [],
+          source_key: employee.crm_source,
+          source_name: draft?.crm_sources.find((source) => source.key === employee.crm_source)?.name ?? employee.crm_source,
+        });
+      }
+    }
+    return people;
+  }, [bitrixUsers.data, draft]);
   if (!draft) return <div style={{ minHeight: "40vh", display: "grid", placeItems: "center" }}><Spin size="large" /></div>;
 
   const mutate = (fn: (next: BusinessSettings) => void) => {
@@ -63,6 +90,23 @@ export default function BusinessSettingsPage() {
   const slaOptions = draft.sla_profiles.map((x) => ({ value: x.key, label: x.name }));
   const departmentOptions = draft.departments.map((x) => ({ value: x.key, label: x.name }));
   const employeeOptions = draft.employees.map((x) => ({ value: x.key, label: x.name }));
+  const bitrixEmployeeOptions = (currentIdentity: string) => {
+    const assigned = new Set(
+      draft.employees
+        .filter((employee) => employee.crm_source && employee.bitrix_user_id)
+        .map((employee) => `${employee.crm_source}:${employee.bitrix_user_id}`),
+    );
+    return draft.crm_sources.map((source) => ({
+      label: source.name,
+      options: [...bitrixPeople.entries()]
+        .filter(([, person]) => person.source_key === source.key)
+        .map(([identity, person]) => ({
+          value: identity,
+          label: `${person.name}${person.active === false ? " · неактивен" : ""}`,
+          disabled: identity !== currentIdentity && assigned.has(identity),
+        })),
+    })).filter((group) => group.options.length);
+  };
   const planTargetOptions = (scope: Plan["scope_type"]) => {
     if (scope === "department") return departmentOptions;
     if (scope === "employee") return employeeOptions;
@@ -367,9 +411,62 @@ export default function BusinessSettingsPage() {
             {draft.departments.map((row, index) => <div className="setrow" key={row.key}><Input value={row.name} onChange={(e) => mutate((x) => { x.departments[index].name = e.target.value; })} /><Switch checked={row.enabled} onChange={(v) => mutate((x) => { x.departments[index].enabled = v; })} /><Button danger onClick={() => mutate((x) => x.departments.splice(index, 1))}>Удалить</Button></div>)}
             <Button onClick={() => mutate((x) => x.departments.push({ key: uid("department"), name: "Новый отдел", enabled: true }))}>Добавить отдел</Button>
           </Card>
-          <Card title="Сотрудники" subtitle="соответствие пользователям Bitrix24, юрлицам и отделам">
-            {draft.employees.map((row, index) => <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}><Input style={inputStyle} placeholder="ФИО" value={row.name} onChange={(e) => mutate((x) => { x.employees[index].name = e.target.value; })} /><Select style={{ width: 190 }} placeholder="Bitrix24" options={draft.crm_sources.map((x) => ({ value: x.key, label: x.name }))} value={row.crm_source || undefined} onChange={(v) => mutate((x) => { x.employees[index].crm_source = v; })} /><Input style={{ width: 140 }} placeholder="ID Bitrix24" value={row.bitrix_user_id} onChange={(e) => mutate((x) => { x.employees[index].bitrix_user_id = e.target.value; })} /><Select style={{ width: 120 }} allowClear placeholder="Юрлицо" options={entityOptions} value={row.legal_entity_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].legal_entity_key = v ?? ""; })} /><Select style={{ width: 180 }} allowClear placeholder="Отдел" options={departmentOptions} value={row.department_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].department_key = v ?? ""; })} /><Switch checked={row.enabled} onChange={(v) => mutate((x) => { x.employees[index].enabled = v; })} /><Button danger onClick={() => mutate((x) => x.employees.splice(index, 1))}>Удалить</Button></div>)}
-            <Button onClick={() => mutate((x) => x.employees.push({ key: uid("employee"), name: "Новый сотрудник", crm_source: x.crm_sources[0]?.key ?? "", bitrix_user_id: "", legal_entity_key: "", department_key: "", enabled: true }))}>Добавить сотрудника</Button>
+          <Card title="Сотрудники" subtitle="выберите пользователя Bitrix24 и назначьте юрлицо и отдел">
+            <div className="setrow" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+              <span className="sub">
+                {bitrixUsers.isLoading
+                  ? "Загружаем сотрудников из обоих Bitrix24…"
+                  : `Доступно сотрудников: ${bitrixPeople.size}`}
+              </span>
+              <Button loading={bitrixUsers.isFetching} onClick={() => bitrixUsers.refetch()}>
+                Обновить список
+              </Button>
+            </div>
+            {(bitrixUsers.data?.sources ?? []).filter((source) => source.error).map((source) => (
+              <Alert
+                key={source.key}
+                type="warning"
+                showIcon
+                style={{ marginBottom: 8 }}
+                message={`${source.name}: ${source.error}`}
+              />
+            ))}
+            {draft.employees.map((row, index) => {
+              const identity = row.crm_source && row.bitrix_user_id
+                ? `${row.crm_source}:${row.bitrix_user_id}`
+                : undefined;
+              return (
+                <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}>
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    style={{ minWidth: 320, flex: "1 1 320px" }}
+                    placeholder="Выберите сотрудника Bitrix24"
+                    loading={bitrixUsers.isLoading}
+                    options={bitrixEmployeeOptions(identity ?? "")}
+                    value={identity}
+                    onChange={(value) => {
+                      const person = bitrixPeople.get(value);
+                      if (!person) return;
+                      mutate((next) => {
+                        const employee = next.employees[index];
+                        employee.name = person.name;
+                        employee.crm_source = person.source_key;
+                        employee.bitrix_user_id = person.id;
+                        if (!employee.legal_entity_key && person.legal_entity_keys.length === 1) {
+                          employee.legal_entity_key = person.legal_entity_keys[0];
+                        }
+                      });
+                    }}
+                  />
+                  <Select style={{ width: 150 }} allowClear placeholder="Юрлицо" options={entityOptions} value={row.legal_entity_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].legal_entity_key = v ?? ""; })} />
+                  <Select style={{ width: 200 }} allowClear placeholder="Отдел" options={departmentOptions} value={row.department_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].department_key = v ?? ""; })} />
+                  <Switch checked={row.enabled} onChange={(v) => mutate((x) => { x.employees[index].enabled = v; })} />
+                  <Button danger onClick={() => mutate((x) => x.employees.splice(index, 1))}>Удалить</Button>
+                </div>
+              );
+            })}
+            <Button disabled={!bitrixPeople.size} onClick={() => mutate((x) => x.employees.push({ key: uid("employee"), name: "", crm_source: "", bitrix_user_id: "", legal_entity_key: "", department_key: "", enabled: true }))}>Добавить сотрудника</Button>
           </Card>
           <Card title="Планы" subtitle="на компанию, отдел или сотрудника; факт рассчитывается автоматически">
             {draft.plans.map((row, index) => (

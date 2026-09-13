@@ -12,12 +12,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import require_owner
 from app.core.config import settings
 from app.core.db import get_session
+from app.models import Deal
 from app.services import integrations_check as checker
 from app.services import integrations_config as cfg
 from app.services import maintenance
@@ -188,6 +190,96 @@ async def bitrix_funnels(
                     item["error"] = (
                         "Не удалось получить воронки. Проверьте вебхук и право чтения CRM."
                     )
+            sources.append(item)
+        return {"sources": sources}
+
+    return await run_in_threadpool(_load)
+
+
+@router.get("/bitrix/users")
+async def bitrix_users(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Сотрудники обоих Bitrix24 для назначения юрлица и отдела.
+
+    Живой справочник дополняется сотрудниками уже загруженных сделок. Поэтому
+    форма остаётся работоспособной, если ``user.get`` временно недоступен или
+    сотрудник уже уволен, но участвует в исторических данных.
+    """
+    await cfg.apply_overrides_from_db(session)
+    known_rows = (await session.execute(
+        select(
+            Deal.crm_source,
+            Deal.mgr_id,
+            Deal.mgr,
+            Deal.legal_entity_key,
+        ).where(Deal.mgr_id.is_not(None), Deal.mgr_id != "").distinct()
+    )).all()
+    known: dict[str, dict[str, dict[str, Any]]] = {}
+    for source_key, user_id, name, entity_key in known_rows:
+        user = known.setdefault(str(source_key), {}).setdefault(str(user_id), {
+            "id": str(user_id),
+            "name": str(name or f"Сотрудник #{user_id}"),
+            "active": None,
+            "legal_entity_keys": set(),
+        })
+        if entity_key:
+            user["legal_entity_keys"].add(str(entity_key))
+
+    def _load() -> dict[str, Any]:
+        from app.integrations.real.bitrix24 import RealBitrix24Adapter
+
+        connections = [
+            ("box", "Коробочный Bitrix24", settings.bitrix_box_webhook_url),
+            ("cloud", "Облачный Bitrix24", settings.bitrix_cloud_webhook_url),
+        ]
+        sources: list[dict[str, Any]] = []
+        for key, name, webhook_url in connections:
+            configured = bool((webhook_url or "").strip())
+            users = dict(known.get(key, {}))
+            item: dict[str, Any] = {
+                "key": key,
+                "name": name,
+                "configured": configured,
+                "ok": False,
+                "users": [],
+            }
+            if not configured:
+                item["error"] = "Сначала сохраните URL входящего вебхука."
+            else:
+                try:
+                    adapter = RealBitrix24Adapter(
+                        webhook_url=webhook_url, source_key=key
+                    )
+                    for remote in adapter.fetch_users():
+                        user_id = str(remote.get("id") or "").strip()
+                        if not user_id:
+                            continue
+                        current = users.get(user_id, {})
+                        users[user_id] = {
+                            "id": user_id,
+                            "name": str(remote.get("name") or current.get("name") or user_id),
+                            "active": remote.get("active"),
+                            "legal_entity_keys": current.get(
+                                "legal_entity_keys", set()
+                            ),
+                        }
+                    item["ok"] = True
+                except Exception:  # noqa: BLE001 — наружу не отдаём URL/токен
+                    item["error"] = (
+                        "Не удалось получить сотрудников через user.get. "
+                        "Показаны сотрудники из уже загруженных сделок."
+                    )
+            item["users"] = sorted(
+                (
+                    {
+                        **user,
+                        "legal_entity_keys": sorted(user["legal_entity_keys"]),
+                    }
+                    for user in users.values()
+                ),
+                key=lambda user: (str(user["name"]).casefold(), str(user["id"])),
+            )
             sources.append(item)
         return {"sources": sources}
 

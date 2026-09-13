@@ -494,7 +494,13 @@ class RealBitrix24Adapter:
                 continue
             parts = [u.get("NAME"), u.get("LAST_NAME")]
             name = " ".join(str(p).strip() for p in parts if p).strip()
-            out.append({"id": str(uid), "name": name or f"ID {uid}"})
+            active_raw = u.get("ACTIVE")
+            active = None if active_raw is None else str(active_raw).upper() in {
+                "Y", "1", "TRUE",
+            }
+            out.append({
+                "id": str(uid), "name": name or f"ID {uid}", "active": active,
+            })
         return out
 
     def fetch_funnels(self) -> list[dict]:

@@ -112,10 +112,34 @@ export interface BitrixFunnelSource {
   funnels: BitrixFunnelOption[];
 }
 
+export interface BitrixUserOption {
+  id: string;
+  name: string;
+  active: boolean | null;
+  legal_entity_keys: string[];
+}
+
+export interface BitrixUserSource {
+  key: string;
+  name: string;
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  users: BitrixUserOption[];
+}
+
 export function useBitrixFunnels() {
   return useQuery<{ sources: BitrixFunnelSource[] }>({
     queryKey: ["integrations", "bitrix", "funnels"],
     queryFn: () => api.get("/integrations/bitrix/funnels"),
+    staleTime: 60_000,
+  });
+}
+
+export function useBitrixUsers() {
+  return useQuery<{ sources: BitrixUserSource[] }>({
+    queryKey: ["integrations", "bitrix", "users"],
+    queryFn: () => api.get("/integrations/bitrix/users"),
     staleTime: 60_000,
   });
 }
