@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -50,7 +51,10 @@ def _crm_type(value: Any) -> str:
     return text
 
 
-def _crm_link(raw: dict, order: dict, counterparty: dict) -> tuple[str, str]:
+_CRM_SOURCE_CODE = re.compile(r"^(box|cloud)[_:-](\d+)$", re.IGNORECASE)
+
+
+def _crm_link(raw: dict, order: dict, counterparty: dict) -> tuple[str, str, str]:
     """Возвращает связанную сущность Bitrix24, отдавая приоритет заказу 1С.
 
     Контрагент часто связан с компанией Bitrix24, а поступление относится к сделке
@@ -66,8 +70,11 @@ def _crm_link(raw: dict, order: dict, counterparty: dict) -> tuple[str, str]:
         entity_type = _crm_type(
             _first(source, "Тип_BTX", "type_btx", "crmEntityType")
         )
-        return code, entity_type
-    return "", ""
+        source_match = _CRM_SOURCE_CODE.fullmatch(code)
+        if source_match:
+            return source_match.group(2), entity_type, source_match.group(1).lower()
+        return code, entity_type, ""
+    return "", "", ""
 
 
 def normalize_receipt(raw: dict) -> dict:
@@ -78,7 +85,7 @@ def normalize_receipt(raw: dict) -> dict:
     contract = _object(raw, "Договор", "contract")
     article = _object(raw, "СтатьяДДС", "article")
     order = _object(raw, "Заказ", "order")
-    crm_external_id, crm_entity_type = _crm_link(raw, order, counterparty)
+    crm_external_id, crm_entity_type, crm_source = _crm_link(raw, order, counterparty)
     return {
         "registrar_id": str(
             _first(
@@ -221,6 +228,7 @@ def normalize_receipt(raw: dict) -> dict:
         "currency": str(_first(raw, "currency", "Валюта", default="RUB")),
         "crm_external_id": crm_external_id,
         "crm_entity_type": crm_entity_type,
+        "crm_source": crm_source,
         "row_number": str(_first(raw, "НомерСтроки", "row_number", "rowNumber")),
         "raw": raw,
     }

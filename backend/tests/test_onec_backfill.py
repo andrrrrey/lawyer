@@ -72,7 +72,7 @@ def test_backfill_fetches_only_missing_deal_from_configured_portal(monkeypatch) 
         }
         receipts = [{
             "crm_external_id": "991", "crm_entity_type": "deal",
-            "legal_entity_key": "urpase", "excluded": False,
+            "crm_source": "cloud", "legal_entity_key": "urpase", "excluded": False,
         }]
         async with maker() as session:
             result = await onec_sync._backfill_missing_deals(

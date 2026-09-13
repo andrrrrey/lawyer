@@ -38,9 +38,11 @@ def _has_matching_deal(row: dict, by_external_id: dict[str, list[Deal]]) -> bool
     candidates = by_external_id.get(external_id, [])
     entity_key = str(row.get("legal_entity_key") or "")
     entity_type = str(row.get("crm_entity_type") or "")
+    crm_source = str(row.get("crm_source") or "")
     return any(
         (not entity_key or deal.legal_entity_key == entity_key)
         and (not entity_type or deal.entity_type == entity_type)
+        and (not crm_source or deal.crm_source == crm_source)
         for deal in candidates
     )
 
@@ -58,6 +60,8 @@ async def _backfill_missing_deals(
             by_external_id.setdefault(str(deal.external_id), []).append(deal)
 
     missing_by_entity: dict[str, set[str]] = {}
+    requested_by_source: dict[str, set[str]] = {}
+    source_map = _deal_sources_by_entity(config)
     for row in receipts:
         external_id = str(row.get("crm_external_id") or "").strip()
         entity_key = str(row.get("legal_entity_key") or "").strip()
@@ -70,12 +74,12 @@ async def _backfill_missing_deals(
         ):
             continue
         missing_by_entity.setdefault(entity_key, set()).add(external_id)
-
-    source_map = _deal_sources_by_entity(config)
-    requested_by_source: dict[str, set[str]] = {}
-    for entity_key, ids in missing_by_entity.items():
-        for source_key in source_map.get(entity_key, set()):
-            requested_by_source.setdefault(source_key, set()).update(ids)
+        source_hint = str(row.get("crm_source") or "").strip()
+        candidate_sources = source_map.get(entity_key, set())
+        if source_hint:
+            candidate_sources = candidate_sources & {source_hint}
+        for source_key in candidate_sources:
+            requested_by_source.setdefault(source_key, set()).add(external_id)
 
     connections = dict(factory.get_bitrix24_connections())
     from app.services.integrations_config import get_field_map
@@ -186,10 +190,13 @@ async def sync_onec(session: AsyncSession) -> dict:
         candidates = by_external_id.get(external_id, []) if external_id else []
         entity_key = str(row.get("legal_entity_key", ""))
         entity_type = str(row.get("crm_entity_type", ""))
+        crm_source = str(row.get("crm_source", ""))
         if entity_key:
             candidates = [deal for deal in candidates if deal.legal_entity_key == entity_key]
         if entity_type:
             candidates = [deal for deal in candidates if deal.entity_type == entity_type]
+        if crm_source:
+            candidates = [deal for deal in candidates if deal.crm_source == crm_source]
         matched = candidates[0] if len(candidates) == 1 else None
         if matched and not row.get("excluded"):
             matched.paid = True

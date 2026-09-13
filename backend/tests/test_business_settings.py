@@ -140,6 +140,7 @@ def test_onec_nested_payload_from_specification_is_normalized() -> None:
         "currency": "RUB",
         "crm_external_id": "991",
         "crm_entity_type": "deal",
+        "crm_source": "",
         "row_number": "1",
         "raw": None,
     }
@@ -155,6 +156,17 @@ def test_onec_order_deal_has_priority_over_counterparty_company() -> None:
 
     assert row["crm_external_id"] == "deal-991"
     assert row["crm_entity_type"] == "deal"
+
+
+def test_onec_prefixed_btx_code_identifies_portal_and_deal_id() -> None:
+    row = normalize_receipt({
+        "Заказ": {"Код_BTX": "CLOUD_38178", "Тип_BTX": "deal"},
+        "Сумма": 1000,
+    })
+
+    assert row["crm_external_id"] == "38178"
+    assert row["crm_entity_type"] == "deal"
+    assert row["crm_source"] == "cloud"
 
 
 def test_receipts_exclude_internal_transfer_and_unknown_article() -> None:

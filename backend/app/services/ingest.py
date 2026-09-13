@@ -1363,10 +1363,13 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
         candidates = by_external_id.get(external_id, []) if external_id else []
         entity_key = str(row.get("legal_entity_key", ""))
         entity_type = str(row.get("crm_entity_type", ""))
+        crm_source = str(row.get("crm_source", ""))
         if entity_key:
             candidates = [deal for deal in candidates if deal.legal_entity_key == entity_key]
         if entity_type:
             candidates = [deal for deal in candidates if deal.entity_type == entity_type]
+        if crm_source:
+            candidates = [deal for deal in candidates if deal.crm_source == crm_source]
         matched = candidates[0] if len(candidates) == 1 else None
         if matched and not row.get("excluded"):
             matched.paid = True
