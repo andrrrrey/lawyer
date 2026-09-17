@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.models import Channel, MinusWord
+from app.models import Channel, MinusWord, OneCReceipt
 from app.seeds.chain import CHAIN_STEPS
 from app.services import channels as ch_svc
 from app.services import format as f
@@ -47,14 +47,115 @@ async def chain(
             "width": s["width"], "glow": s.get("glow", False), "display": display,
         })
 
-    # Конверсия между шагами — только когда у обоих соседних шагов есть числа.
+    # Конверсия имеет смысл только между соседними количественными шагами.
+    # Между «оплатами» и рублями её не считаем; при нулевом знаменателе также
+    # показываем отсутствие данных вместо искусственных сотен тысяч процентов.
     for i, step in enumerate(steps):
-        if i == 0 or not _has_num(steps[i - 1]["display"]) or not _has_num(step["display"]):
+        previous_kind = CHAIN_STEPS[i - 1].get("kind") if i else None
+        current_kind = CHAIN_STEPS[i].get("kind")
+        previous_value = _digits(steps[i - 1]["display"]) if i else 0
+        if (
+            i == 0
+            or previous_kind != "count"
+            or current_kind != "count"
+            or not _has_num(steps[i - 1]["display"])
+            or not _has_num(step["display"])
+            or previous_value == 0
+        ):
             step["conversion"] = None
         else:
-            prev = _digits(steps[i - 1]["display"]) or 1
-            step["conversion"] = round(_digits(step["display"]) / prev * 100)
+            step["conversion"] = round(_digits(step["display"]) / previous_value * 100)
     return steps
+
+
+async def reconciliation(
+    session: AsyncSession, period: str, legal_entity: str = "all"
+) -> dict:
+    """Прозрачная сверка созданных сущностей Bitrix и денежных фактов 1С.
+
+    Сумма Bitrix — договорная сумма успешных сделок, *созданных* в периоде.
+    Выручка 1С — поступления с датой регистратора в периоде. Это разные когорты,
+    поэтому разницу показываем явно, а не маскируем некорректной конверсией.
+    """
+    from datetime import UTC, datetime
+
+    from app.services import business_settings, metrics
+    from app.services import period as per
+
+    rows = await metrics.period_deals(
+        session, period, legal_entity=legal_entity
+    )
+    leads = [row for row in rows if row.entity_type == "lead"]
+    deals = [row for row in rows if row.entity_type == "deal"]
+    successful = [row for row in deals if row.status_class == "st-ok"]
+
+    start = per.start(period, datetime.now(UTC))
+    end = per.end(period, datetime.now(UTC))
+    receipt_stmt = select(OneCReceipt).where(
+        OneCReceipt.registrar_date.is_not(None),
+        OneCReceipt.registrar_date >= start,
+    )
+    if end is not None:
+        receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
+    if legal_entity and legal_entity != "all":
+        receipt_stmt = receipt_stmt.where(OneCReceipt.legal_entity_key == legal_entity)
+    receipt_rows = list((await session.execute(receipt_stmt)).scalars().all())
+    included = [row for row in receipt_rows if not row.excluded]
+    excluded = [row for row in receipt_rows if row.excluded]
+    matched = [row for row in included if row.matched_deal_id is not None]
+    unmatched = [row for row in included if row.matched_deal_id is None]
+
+    config = await business_settings.get_settings(session)
+    funnel_names = {
+        (str(item.get("crm_source")), str(item.get("external_id"))): str(item.get("name"))
+        for item in config.get("funnels", [])
+    }
+    funnel_totals: dict[tuple[str, str], dict] = {}
+    for deal in deals:
+        identity = (deal.crm_source, deal.funnel_id)
+        item = funnel_totals.setdefault(identity, {
+            "crm_source": deal.crm_source,
+            "funnel_id": deal.funnel_id,
+            "name": funnel_names.get(identity) or deal.funnel_name or deal.funnel_id,
+            "deals": 0,
+            "successful_deals": 0,
+            "successful_amount": 0,
+        })
+        item["deals"] += 1
+        if deal.status_class == "st-ok":
+            item["successful_deals"] += 1
+            item["successful_amount"] += int(deal.amount or 0)
+
+    successful_amount = sum(int(row.amount or 0) for row in successful)
+    revenue = sum((row.amount for row in included), start=0)
+    matched_revenue = sum((row.amount for row in matched), start=0)
+    unmatched_revenue = sum((row.amount for row in unmatched), start=0)
+    excluded_amount = sum((row.amount for row in excluded), start=0)
+    return {
+        "timezone": "Europe/Moscow",
+        "bitrix": {
+            "leads": len(leads),
+            "deals": len(deals),
+            "successful_deals": len(successful),
+            "successful_amount": float(successful_amount),
+        },
+        "onec": {
+            "payments": len(included),
+            "revenue": float(revenue),
+            "matched_payments": len(matched),
+            "matched_deals": len({row.matched_deal_id for row in matched}),
+            "matched_revenue": float(matched_revenue),
+            "unmatched_payments": len(unmatched),
+            "unmatched_revenue": float(unmatched_revenue),
+            "excluded_payments": len(excluded),
+            "excluded_amount": float(excluded_amount),
+        },
+        "difference": float(revenue - successful_amount),
+        "funnels": sorted(
+            funnel_totals.values(),
+            key=lambda item: (-item["successful_amount"], item["name"]),
+        ),
+    }
 
 
 async def _channels(session: AsyncSession) -> list[Channel]:

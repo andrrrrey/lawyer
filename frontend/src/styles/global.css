@@ -338,6 +338,15 @@ tr.rk-row-mid td:first-child { box-shadow: inset 3px 0 0 var(--amber); }
 .chain-conv { font-size: 11px; color: var(--muted); margin-top: 9px; font-weight: 500; }
 .chain-conv b { color: var(--ink); }
 
+.recon-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.recon-box { display: flex; flex-direction: column; gap: 5px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #F8F9FC; }
+.recon-box > span { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.recon-box > b { font-size: 18px; color: var(--ink); }
+.recon-box > small { color: var(--muted); line-height: 1.45; }
+.recon-ok { background: var(--green-soft); border-color: #C7EEDB; }
+.recon-warn { background: var(--amber-soft); border-color: #FAE3C0; }
+@media (max-width: 900px) { .recon-grid { grid-template-columns: 1fr; } }
+
 /* Рекомендации ROMI */
 .rec { padding: 17px 18px; border-radius: 14px; border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); display: flex; gap: 14px; }
 .rec .ric { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; }

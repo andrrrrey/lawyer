@@ -98,6 +98,13 @@ def test_analytics_chain(client: TestClient) -> None:
     assert len(data) == 6
     assert data[0]["conversion"] is None
     assert data[1]["conversion"] is not None
+    assert data[-1]["conversion"] is None
+
+
+def test_analytics_reconciliation(client: TestClient) -> None:
+    data = client.get("/api/analytics/reconciliation", params={"period": "30"}).json()
+    assert set(data) == {"timezone", "bitrix", "onec", "difference", "funnels"}
+    assert data["timezone"] == "Europe/Moscow"
 
 
 def test_analytics_channels(client: TestClient) -> None:

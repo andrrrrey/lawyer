@@ -12,11 +12,13 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from app.seeds.kpi import PLABEL, PMUL
 
 DEFAULT_PERIOD = "30"
+REPORT_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 # Длительность периодов (дней) — реальная фильтрация по датам в боевом режиме.
 PERIOD_DAYS: dict[str, int] = {"today": 1, "7": 7, "30": 30, "quarter": 90}
@@ -89,14 +91,15 @@ def days(period: str | None) -> int:
 
 
 def start(period: str | None, now: datetime) -> datetime:
-    """Начало периода: «сегодня» — с полуночи, остальные — скользящее окно."""
+    """Начало периода в часовом поясе отчёта (Москва)."""
+    local_now = now.astimezone(REPORT_TIMEZONE)
     custom = _parse_custom(period)
     if custom is not None:
-        return datetime.combine(custom[0], time.min, tzinfo=now.tzinfo or UTC)
+        return datetime.combine(custom[0], time.min, tzinfo=REPORT_TIMEZONE)
     p = norm_period(period)
     if p == "today":
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return now - timedelta(days=PERIOD_DAYS[p])
+        return local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_now - timedelta(days=PERIOD_DAYS[p])
 
 
 def end(period: str | None, now: datetime) -> datetime | None:
@@ -109,5 +112,5 @@ def end(period: str | None, now: datetime) -> datetime | None:
     custom = _parse_custom(period)
     if custom is not None:
         upper = custom[1] + timedelta(days=1)
-        return datetime.combine(upper, time.min, tzinfo=now.tzinfo or UTC)
+        return datetime.combine(upper, time.min, tzinfo=REPORT_TIMEZONE)
     return None

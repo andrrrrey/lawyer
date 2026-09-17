@@ -22,10 +22,37 @@ export interface ChannelRow extends Omit<Campaign, "name"> {
   name: string; color: string; campaigns: Campaign[];
 }
 
+export interface Reconciliation {
+  timezone: string;
+  bitrix: {
+    leads: number; deals: number; successful_deals: number; successful_amount: number;
+  };
+  onec: {
+    payments: number; revenue: number;
+    matched_payments: number; matched_deals: number; matched_revenue: number;
+    unmatched_payments: number; unmatched_revenue: number;
+    excluded_payments: number; excluded_amount: number;
+  };
+  difference: number;
+  funnels: Array<{
+    crm_source: string; funnel_id: string; name: string; deals: number;
+    successful_deals: number; successful_amount: number;
+  }>;
+}
+
 export const useChain = (period: string, legalEntity: string) =>
   useQuery<ChainStep[]>({
     queryKey: ["analytics", "chain", period, legalEntity],
     queryFn: () => api.get(`/analytics/chain?period=${encodeURIComponent(period)}&legal_entity=${encodeURIComponent(legalEntity)}`),
+  });
+
+export const useReconciliation = (period: string, legalEntity: string) =>
+  useQuery<Reconciliation>({
+    queryKey: ["analytics", "reconciliation", period, legalEntity],
+    queryFn: () => api.get(
+      `/analytics/reconciliation?period=${encodeURIComponent(period)}` +
+        `&legal_entity=${encodeURIComponent(legalEntity)}`,
+    ),
   });
 
 export const useChannels = (channel: string, period: string, legalEntity: string) =>

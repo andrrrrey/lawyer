@@ -34,6 +34,7 @@ from app.models import (
     Visit,
 )
 from app.services import analytics, metrics
+from app.services import period as period_service
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_period_test.db"
 
@@ -150,22 +151,26 @@ def test_ad_metrics_fall_back_without_daily_rows() -> None:
 
 
 def test_kpis_follow_period_and_filters() -> None:
-    """Лиды и выручка отвечают и на период, и на выбор менеджера/источника."""
+    """Сделки и выручка отвечают и на период, и на выбор менеджера/источника."""
     async def check(s: AsyncSession) -> None:
         month = await metrics._period_baseline(s, "30")
-        assert month["leads"] == 3
+        assert month["leads"] == 0
+        assert month["deals"] == 3
         assert month["revenue"] == 600_000
 
         today = await metrics._period_baseline(s, "today")
-        assert today["leads"] == 1
+        assert today["leads"] == 0
+        assert today["deals"] == 1
         assert today["revenue"] == 100_000
 
         by_mgr = await metrics._period_baseline(s, "30", mgr="Иванов")
-        assert by_mgr["leads"] == 2
+        assert by_mgr["leads"] == 0
+        assert by_mgr["deals"] == 2
         assert by_mgr["revenue"] == 400_000
 
         by_src = await metrics._period_baseline(s, "30", source="Звонок")
-        assert by_src["leads"] == 1
+        assert by_src["leads"] == 0
+        assert by_src["deals"] == 1
         assert by_src["revenue"] == 200_000
 
         # Рекламные показатели не разрезаются менеджером — расход относится к
@@ -408,12 +413,14 @@ def test_custom_period_exact_date_and_interval() -> None:
 
         # Точная дата: только сделка, созданная 3 дня назад (amount 200_000).
         exact = await metrics._period_baseline(s, f"date:{day(3)}")
-        assert exact["leads"] == 1
+        assert exact["leads"] == 0
+        assert exact["deals"] == 1
         assert exact["revenue"] == 200_000
 
         # Интервал 3..20 дней назад включительно: сделки #2 и #3.
         interval = await metrics._period_baseline(s, f"range:{day(20)}:{day(3)}")
-        assert interval["leads"] == 2
+        assert interval["leads"] == 0
+        assert interval["deals"] == 2
         assert interval["revenue"] == 500_000  # 200_000 + 300_000
 
         # Таблица лидов следует тем же границам.
@@ -437,6 +444,42 @@ def test_custom_period_exact_date_and_interval() -> None:
         # Лид 60-дневной давности выпадает из окна 0..20.
         donut = {r["name"]: r["leads"] for r in await metrics.sources(s, f"range:{day(20)}:{day(0)}")}
         assert donut == {"Сайт": 2, "Звонок": 1}
+
+    with_real_data(check)
+
+
+def test_custom_period_uses_moscow_calendar_boundaries() -> None:
+    now = datetime(2026, 9, 17, 12, tzinfo=UTC)
+    start = period_service.start("range:2026-09-10:2026-09-14", now)
+    end = period_service.end("range:2026-09-10:2026-09-14", now)
+
+    assert start.isoformat() == "2026-09-10T00:00:00+03:00"
+    assert end is not None
+    assert end.isoformat() == "2026-09-15T00:00:00+03:00"
+
+
+def test_reconciliation_separates_bitrix_entities_and_onec_facts() -> None:
+    async def check(s: AsyncSession) -> None:
+        lead = _deal(
+            50, days_ago=0, mgr="Иванов", src="Сайт", amount=0, won=False,
+        )
+        lead.entity_type = "lead"
+        lead.funnel_id = "lead"
+        s.add(lead)
+        s.add(OneCReceipt(
+            external_key="recon-payment", registrar_id="payment-1",
+            registrar_number="1", registrar_type="ПоступлениеНаСчет",
+            registrar_date=NOW, legal_entity_key="", article_name="Юридические услуги",
+            amount=100_000, excluded=False,
+        ))
+        await s.commit()
+
+        data = await analytics.reconciliation(s, "today")
+        assert data["bitrix"]["leads"] == 1
+        assert data["bitrix"]["deals"] == 1
+        assert data["onec"]["payments"] == 1
+        assert data["onec"]["unmatched_payments"] == 1
+        assert data["onec"]["revenue"] == 100_000
 
     with_real_data(check)
 

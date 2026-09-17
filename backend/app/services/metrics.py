@@ -255,10 +255,12 @@ async def _period_baseline(
     # Расход/клики/визиты — из посуточного сырья источников за тот же период.
     ad = await _ad_totals(session, period, legal_entity)
 
+    lead_rows = [deal for deal in rows if deal.entity_type == "lead"]
+    deal_rows = [deal for deal in rows if deal.entity_type == "deal"]
     return {
-        "leads": float(len(rows)),
+        "leads": float(len(lead_rows)),
         "qual": float(sum(1 for d in rows if d.stage not in (None, "Новое обращение"))),
-        "deals": float(sum(1 for d in rows if (d.amount or 0) > 0)),
+        "deals": float(len(deal_rows)),
         "invoices": float(sum(1 for d in rows if d.invoice)),
         "payments": float(payments),
         "revenue": float(revenue),

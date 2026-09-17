@@ -37,3 +37,14 @@ async def get_channels(
     return await analytics.channels_table(
         session, channel=channel, period=period, legal_entity=legal_entity
     )
+
+
+@router.get("/reconciliation")
+async def get_reconciliation(
+    period: str = "30",
+    legal_entity: str = "all",
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    return await analytics.reconciliation(
+        session, period=period, legal_entity=legal_entity
+    )

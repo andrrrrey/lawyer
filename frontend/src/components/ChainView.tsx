@@ -33,7 +33,11 @@ export function ChainView({ steps }: { steps: ChainStep[] }) {
             </div>
           ) : null}
           <div className="chain-conv">
-            {i === 0 ? "старт" : <>конверсия <b>{s.conversion}%</b></>}
+            {i === 0
+              ? "старт"
+              : s.conversion === null
+                ? "конверсия —"
+                : <>конверсия <b>{s.conversion}%</b></>}
           </div>
         </div>
       ))}
