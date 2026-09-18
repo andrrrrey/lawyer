@@ -351,7 +351,7 @@ def test_real_funnel_uses_stage_history_and_unique_paid_deals() -> None:
         ]
         summary = await metrics.funnel(s, "30")
         assert summary == [
-            {"label": "Обращения", "value": 1},
+            {"label": "Обращения", "value": 0},
             {"label": "Сделки", "value": 1},
             {"label": "Дошли до ожидания оплаты", "value": 1},
             {"label": "Оплачено по 1С", "value": 1},

@@ -701,7 +701,8 @@ async def funnel(
     }
     expected_ids = {
         row.id for row in rows
-        if reached.get(row.id, set()) & expected_by_funnel.get(
+        if row.entity_type == "deal"
+        and reached.get(row.id, set()) & expected_by_funnel.get(
             (row.crm_source, row.funnel_id), set()
         )
     }
@@ -709,7 +710,9 @@ async def funnel(
     # менеджер пропустил ожидаемую стадию в CRM.
     expected_ids.update(paid_ids)
     return [
-        {"label": "Обращения", "value": len(rows)},
+        {"label": "Обращения", "value": sum(
+            1 for row in rows if row.entity_type == "lead"
+        )},
         {"label": "Сделки", "value": sum(1 for row in rows if row.entity_type == "deal")},
         {"label": "Дошли до ожидания оплаты", "value": len(expected_ids)},
         {"label": "Оплачено по 1С", "value": len(paid_ids)},
