@@ -154,6 +154,11 @@ body {
 .mstat.active { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
 
 /* Список нарушений */
+.violation-filters { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; padding: 14px 18px; background: #FAFAFC; border-bottom: 1px solid var(--line2); }
+.violation-filter-field { display: flex; flex-direction: column; gap: 6px; }
+.violation-filter-field > span { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.violation-filter-summary { display: flex; align-items: center; gap: 4px; margin-left: auto; min-height: 32px; font-size: 12px; color: var(--muted); }
+.violation-filter-summary b { color: var(--ink); }
 .deal-list { display: flex; flex-direction: column; }
 .deal { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--line2); transition: background .12s; }
 .deal:last-child { border-bottom: none; }
@@ -225,6 +230,7 @@ body {
 .sd-row .sd-p { flex: 1; font-size: 13px; font-weight: 500; }
 
 @media (max-width: 1100px) { .admin-grid { grid-template-columns: 1fr; } .mon-stats { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 720px) { .violation-filter-field, .violation-filter-field .ant-select, .violation-filter-field .ant-picker { width: 100% !important; } .violation-filter-summary { width: 100%; margin-left: 0; } }
 
 /* ==========================================================================
    Дашборд / аналитика / ROMI / AI (перенос из прототипа)

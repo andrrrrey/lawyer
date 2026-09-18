@@ -14,6 +14,10 @@ interface Props {
 export function ViolationRow({ v, onTask, taskPending, taskDone }: Props) {
   const barColor = v.severity === "review" ? "var(--violet)" : v.over ? "var(--red)" : "var(--amber)";
   const slaCls = v.over ? "over" : v.sla === "—" ? "" : "warn";
+  const eventDate = v.violation_at
+    ? new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })
+        .format(new Date(v.violation_at))
+    : null;
 
   return (
     <div className="deal">
@@ -27,6 +31,7 @@ export function ViolationRow({ v, onTask, taskPending, taskDone }: Props) {
         <div className="meta">
           <span>👤 {v.mgr}</span>
           <span>◎ {v.src}</span>
+          {eventDate ? <span>📅 {eventDate}</span> : null}
           {v.norm ? <span>⏱ {v.norm}</span> : null}
         </div>
         <div className="ai-note">

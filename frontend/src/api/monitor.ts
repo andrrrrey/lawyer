@@ -32,6 +32,7 @@ export interface Violation {
   amount: number;
   amount_display: string;
   ai: string;
+  violation_at: string | null;
 }
 
 export function useMonitorStats() {
@@ -41,10 +42,21 @@ export function useMonitorStats() {
   });
 }
 
-export function useViolations(ptype: string | null) {
+export interface ViolationFilters {
+  ptype?: string | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+}
+
+export function useViolations({ ptype, dateFrom, dateTo }: ViolationFilters) {
+  const params = new URLSearchParams();
+  if (ptype) params.set("ptype", ptype);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  const query = params.toString();
   return useQuery<Violation[]>({
-    queryKey: ["monitor", "violations", ptype],
-    queryFn: () => api.get(`/monitor/violations${ptype ? `?ptype=${encodeURIComponent(ptype)}` : ""}`),
+    queryKey: ["monitor", "violations", ptype, dateFrom, dateTo],
+    queryFn: () => api.get(`/monitor/violations${query ? `?${query}` : ""}`),
   });
 }
 

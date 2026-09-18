@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -65,12 +67,23 @@ async def stats(
 
 async def violations(
     session: AsyncSession, ptype: str | None = None, mgr: str | list[str] = "all",
-    hide_financial: bool = False,
+    hide_financial: bool = False, date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict]:
     res = await vio.evaluate_current(session, mgr=mgr)
     regular = res["regular"]
     if ptype:
         regular = [v for v in regular if v["ptype"] == ptype]
+    if date_from:
+        regular = [
+            v for v in regular
+            if v.get("violation_at") and v["violation_at"].date() >= date_from
+        ]
+    if date_to:
+        regular = [
+            v for v in regular
+            if v.get("violation_at") and v["violation_at"].date() <= date_to
+        ]
     result = _with_amount_display(regular)
     if hide_financial:
         for row in result:

@@ -1,4 +1,5 @@
-import { App, Button, Spin } from "antd";
+import { App, Button, DatePicker, Select, Spin } from "antd";
+import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -14,7 +15,15 @@ const PTYPE_LABEL: Record<string, string> = {
   dup: "Возможные дубли",
   spam: "Подозрительный спам/отказ",
   refusal: "Подозрительный спам/отказ",
+  no_reason: "Отказ без причины",
 };
+
+const VIOLATION_TYPE_OPTIONS = [
+  { value: "all", label: "Все типы нарушений" },
+  ...Object.entries(PTYPE_LABEL)
+    .filter(([key]) => key !== "spam" && key !== "refusal")
+    .map(([value, label]) => ({ value, label })),
+];
 
 // Подписи фильтра по серьёзности (плашки статистики) — совпадают с подписями плашек.
 const SEV_LABEL: Record<string, string> = {
@@ -28,12 +37,14 @@ export default function MonitorPage() {
   const [params, setParams] = useSearchParams();
   const filter = params.get("ptype");
   const sev = params.get("sev");
+  const dateFrom = params.get("date_from");
+  const dateTo = params.get("date_to");
   const isReviewFilter = filter === "spam" || filter === "refusal" || sev === "review";
 
   const stats = useMonitorStats();
   // Список regular тянем целиком (по ptype), а фильтр по серьёзности применяем на
   // клиенте — severity уже есть в каждой строке, отдельный запрос не нужен.
-  const violations = useViolations(filter);
+  const violations = useViolations({ ptype: filter, dateFrom, dateTo });
   const review = useReview();
   const createTask = useCreateTask();
   const { message } = App.useApp();
@@ -65,16 +76,34 @@ export default function MonitorPage() {
     reviewPage * PAGE_SIZE, reviewPage * PAGE_SIZE + PAGE_SIZE) ?? [];
 
   // Сброс страниц при смене фильтра или объёма данных.
-  useEffect(() => { setPage(0); }, [filter, sev, total]);
+  useEffect(() => { setPage(0); }, [filter, sev, dateFrom, dateTo, total]);
   useEffect(() => { setReviewPage(0); }, [filter, reviewTotal]);
 
-  const clearFilter = () => setParams({});
+  const updateParams = (mutate: (next: URLSearchParams) => void) => {
+    const next = new URLSearchParams(params);
+    mutate(next);
+    setParams(next);
+  };
 
-  // Клик по плашке статистики: ставим ?sev=key (фильтры ptype и sev взаимоисключающие);
-  // повторный клик по активной плашке снимает фильтр.
+  const clearMainFilter = () => updateParams((next) => {
+    if (sev) next.delete("sev");
+    else next.delete("ptype");
+  });
+
+  const clearListFilters = () => updateParams((next) => {
+    next.delete("ptype");
+    next.delete("date_from");
+    next.delete("date_to");
+  });
+
+  // Верхняя плашка задаёт серьёзность, но не сбрасывает тип и дату:
+  // все три фильтра должны работать совместно.
   const onStatClick = (key?: string) => {
     if (!key) return;
-    setParams(sev === key ? {} : { sev: key });
+    updateParams((next) => {
+      if (sev === key) next.delete("sev");
+      else next.set("sev", key);
+    });
   };
 
   const onTask = (dealKey: string) => {
@@ -103,8 +132,8 @@ export default function MonitorPage() {
       {filter || sev ? (
         <div style={{ marginBottom: 14 }}>
           <span className="filterpill">
-            Фильтр: <b>{filter ? (PTYPE_LABEL[filter] ?? filter) : (SEV_LABEL[sev!] ?? sev)}</b>
-            <button onClick={clearFilter}>×</button>
+            Фильтр: <b>{sev ? (SEV_LABEL[sev] ?? sev) : (PTYPE_LABEL[filter!] ?? filter)}</b>
+            <button onClick={clearMainFilter} aria-label="Снять фильтр">×</button>
           </span>
         </div>
       ) : null}
@@ -141,6 +170,44 @@ export default function MonitorPage() {
             <span className="live">
               <span className="p" />В реальном времени
             </span>
+          </div>
+        </div>
+        <div className="violation-filters">
+          <div className="violation-filter-field">
+            <span>Тип нарушения</span>
+            <Select
+              value={filter ?? "all"}
+              options={VIOLATION_TYPE_OPTIONS}
+              style={{ width: 260 }}
+              onChange={(value) => updateParams((next) => {
+                if (value === "all") next.delete("ptype");
+                else next.set("ptype", value);
+              })}
+            />
+          </div>
+          <div className="violation-filter-field">
+            <span>Дата события</span>
+            <DatePicker.RangePicker
+              value={dateFrom && dateTo ? [dayjs(dateFrom), dayjs(dateTo)] : null}
+              format="DD.MM.YYYY"
+              placeholder={["С", "По"]}
+              disabledDate={(date) => date.isAfter(dayjs().endOf("day"))}
+              onChange={(range) => updateParams((next) => {
+                if (range?.[0] && range[1]) {
+                  next.set("date_from", range[0].format("YYYY-MM-DD"));
+                  next.set("date_to", range[1].format("YYYY-MM-DD"));
+                } else {
+                  next.delete("date_from");
+                  next.delete("date_to");
+                }
+              })}
+            />
+          </div>
+          <div className="violation-filter-summary">
+            <span>Найдено: <b>{total}</b></span>
+            {filter || dateFrom || dateTo ? (
+              <Button type="link" size="small" onClick={clearListFilters}>Сбросить</Button>
+            ) : null}
           </div>
         </div>
         <div className="deal-list">

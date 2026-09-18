@@ -47,6 +47,7 @@ def test_engine_matches_prototype() -> None:
         assert set(_ptypes(res["regular"])) == {
             "overdue_contact", "no_task", "stuck", "no_recontact", "fields", "dup"
         }
+        assert all(v["violation_at"] is not None for v in res["regular"])
         assert {v["ptype"] for v in res["review"]} == {"spam", "refusal"}
 
     with_seeded(check)

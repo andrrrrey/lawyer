@@ -84,8 +84,29 @@ def test_monitor_stats(client: TestClient) -> None:
 def test_monitor_violations_and_filter(client: TestClient) -> None:
     allv = client.get("/api/monitor/violations").json()
     assert len(allv) == 6
+    assert all("violation_at" in row for row in allv)
     one = client.get("/api/monitor/violations", params={"ptype": "overdue_contact"}).json()
     assert len(one) == 1 and one[0]["ptype"] == "overdue_contact"
+
+    event_date = one[0]["violation_at"][:10]
+    same_day = client.get(
+        "/api/monitor/violations",
+        params={"ptype": "overdue_contact", "date_from": event_date, "date_to": event_date},
+    ).json()
+    assert len(same_day) == 1
+    outside = client.get(
+        "/api/monitor/violations",
+        params={"ptype": "overdue_contact", "date_from": "2000-01-01", "date_to": "2000-01-02"},
+    ).json()
+    assert outside == []
+
+
+def test_monitor_violation_date_range_validation(client: TestClient) -> None:
+    response = client.get(
+        "/api/monitor/violations",
+        params={"date_from": "2026-09-10", "date_to": "2026-09-01"},
+    )
+    assert response.status_code == 422
 
 
 def test_monitor_review(client: TestClient) -> None:

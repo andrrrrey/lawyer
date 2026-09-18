@@ -177,6 +177,22 @@ def _src_label(deal: Deal) -> str:
     return (camp[:40] + "…" if len(camp) > 40 else camp) or "—"
 
 
+def _violation_at(deal: Deal, ptype: str) -> datetime | None:
+    """Дата события, из-за которого возникло нарушение.
+
+    Это не дата пересчёта: иначе ночное обновление ежедневно меняло бы
+    дату одного и того же нарушения. Для каждого типа берём его опорное
+    CRM-событие, а при неполных данных — ближайшую доступную дату.
+    """
+    if ptype == "overdue_contact":
+        return deal.created_at
+    if ptype in {"stuck", "no_task"}:
+        return deal.stage_entered_at or deal.created_at
+    if ptype in {"no_recontact", "no_reason", "refusal", "spam"}:
+        return deal.last_activity_at or deal.stage_entered_at or deal.created_at
+    return deal.last_activity_at or deal.stage_entered_at or deal.created_at
+
+
 def _mk(deal: Deal, ptype: str, *, over: bool, sla: str, norm: str, amount: int, ai: str,
         category: str = "regular") -> dict:
     label, cls = KIND[ptype]
@@ -187,6 +203,7 @@ def _mk(deal: Deal, ptype: str, *, over: bool, sla: str, norm: str, amount: int,
         "name": f"{deal.name} · {deal.ref}" if deal.ref else deal.name,
         "ref": deal.ref, "mgr": deal.mgr, "src": _src_label(deal),
         "deal_key": f"{deal.crm_source}:{deal.entity_type}:{deal.external_id or deal.id}",
+        "violation_at": _violation_at(deal, ptype),
         "norm": norm, "sla": sla, "over": over, "amount": amount, "ai": ai,
     }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
@@ -43,12 +44,18 @@ async def get_stats(
 
 @router.get("/violations")
 async def get_violations(
-    ptype: str | None = None, session: AsyncSession = Depends(get_session),
+    ptype: str | None = None, date_from: date | None = None, date_to: date | None = None,
+    session: AsyncSession = Depends(get_session),
     user: AuthUser = Depends(require_session),
 ) -> list[dict[str, Any]]:
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Дата начала не может быть позже даты окончания",
+        )
     return await monitor.violations(
         session, ptype=ptype, mgr=await _manager_scope(session, user),
-        hide_financial=user.role == "manager",
+        hide_financial=user.role == "manager", date_from=date_from, date_to=date_to,
     )
 
 
