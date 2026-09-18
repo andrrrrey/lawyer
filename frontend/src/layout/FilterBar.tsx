@@ -49,6 +49,16 @@ function opts(all: string, values: string[]) {
   return [{ value: "all", label: all }, ...values.map((v) => ({ value: v, label: v }))];
 }
 
+const ALL = "__all__";
+
+function multiOptions(all: string, values: { value: string; label: string }[]) {
+  return [{ value: ALL, label: all }, ...values];
+}
+
+function normalizedMulti(values: string[]) {
+  return values.includes(ALL) ? [] : values;
+}
+
 // Кнопка «Период» в переключателе: выбор точной даты или интервала дат.
 function CustomPeriod({ period, onPick }: { period: string; onPick: (v: string) => void }) {
   const current = parseCustom(period);
@@ -144,19 +154,32 @@ export function FilterBar() {
       ) : null}
       <div className="spacer" />
       {controls.includes("legalEntity") ? (
-        <Select
-          className="fb-select"
-          value={f.legalEntity}
-          onChange={(value) => {
-            f.setLegalEntity(value);
-            f.setFunnel("all");
-            f.setLeadFilter(null);
-          }}
-          options={[
-            { value: "all", label: "Все юрлица" },
-            ...(o.data?.legal_entities ?? []),
-          ]}
-        />
+        path === "/dashboard" ? (
+          <Select
+            className="fb-select fb-select-multiple"
+            mode="multiple"
+            allowClear
+            maxTagCount="responsive"
+            placeholder="Все юрлица"
+            value={f.legalEntity}
+            onChange={(values) => {
+              f.setLegalEntity(normalizedMulti(values));
+              f.setFunnel([]);
+              f.setLeadFilter(null);
+            }}
+            options={multiOptions("Все юрлица", o.data?.legal_entities ?? [])}
+          />
+        ) : (
+          <Select
+            className="fb-select"
+            value={f.legalEntity[0] ?? "all"}
+            onChange={(value) => f.setLegalEntity(value === "all" ? [] : [value])}
+            options={[
+              { value: "all", label: "Все юрлица" },
+              ...(o.data?.legal_entities ?? []),
+            ]}
+          />
+        )
       ) : null}
       {controls.includes("channel") ? (
         <Select
@@ -168,21 +191,29 @@ export function FilterBar() {
       ) : null}
       {controls.includes("funnel") ? (
         <Select
-          className="fb-select"
+          className="fb-select fb-select-multiple"
+          mode="multiple"
+          allowClear
+          maxTagCount="responsive"
+          placeholder="Все воронки"
           value={f.funnel}
-          onChange={(value) => { f.setFunnel(value); f.setLeadFilter(null); }}
-          options={[
-            { value: "all", label: "Все воронки" },
-            ...(o.data?.funnels ?? []),
-          ]}
+          onChange={(values) => { f.setFunnel(normalizedMulti(values)); f.setLeadFilter(null); }}
+          options={multiOptions("Все воронки", o.data?.funnels ?? [])}
         />
       ) : null}
       {controls.includes("mgr") ? (
         <Select
-          className="fb-select"
+          className="fb-select fb-select-multiple"
+          mode="multiple"
+          allowClear
+          maxTagCount="responsive"
+          placeholder="Все менеджеры"
           value={f.mgr}
-          onChange={(v) => { f.setMgr(v); f.setLeadFilter(null); }}
-          options={opts("Все менеджеры", o.data?.managers ?? [])}
+          onChange={(values) => { f.setMgr(normalizedMulti(values)); f.setLeadFilter(null); }}
+          options={multiOptions(
+            "Все менеджеры",
+            (o.data?.managers ?? []).map((value) => ({ value, label: value })),
+          )}
         />
       ) : null}
       {controls.includes("source") ? (

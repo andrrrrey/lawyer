@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,32 +10,45 @@ from app.models import Deal
 from app.services import business_settings, content, reglament
 from app.services.clock import reference_now
 
+FilterValue = str | list[str]
+
+
+def _values(value: FilterValue) -> list[str]:
+    if isinstance(value, list):
+        return [item for item in value if item and item != "all"]
+    return [] if not value or value == "all" else [value]
+
 
 async def evaluate_current(
     session: AsyncSession,
     mgr: str | list[str] = "all",
     source: str = "all",
-    legal_entity: str = "all",
-    funnel: str = "all",
+    legal_entity: FilterValue = "all",
+    funnel: FilterValue = "all",
 ) -> dict:
     """Возвращает {'regular': [...], 'review': [...]} по текущим данным и настройкам.
 
     mgr/source — фильтры дашборда: сужают набор сделок до передачи в движок,
     чтобы счётчики триажа отвечали на выбор менеджера и источника."""
     stmt = select(Deal).options(selectinload(Deal.tasks)).order_by(Deal.position)
-    if mgr and mgr != "all":
-        stmt = stmt.where(Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr)
+    manager_values = _values(mgr)
+    if manager_values:
+        stmt = stmt.where(Deal.mgr.in_(manager_values))
     if source and source != "all":
         stmt = stmt.where(Deal.src == source)
-    if legal_entity and legal_entity != "all":
-        stmt = stmt.where(Deal.legal_entity_key == legal_entity)
-    if funnel and funnel != "all":
-        crm_source, separator, funnel_id = funnel.partition(":")
+    legal_values = _values(legal_entity)
+    if legal_values:
+        stmt = stmt.where(Deal.legal_entity_key.in_(legal_values))
+    funnel_clauses = []
+    for value in _values(funnel):
+        crm_source, separator, funnel_id = value.partition(":")
         if separator and crm_source and funnel_id:
-            stmt = stmt.where(
+            funnel_clauses.append(and_(
                 Deal.crm_source == crm_source,
                 Deal.funnel_id == funnel_id,
-            )
+            ))
+    if funnel_clauses:
+        stmt = stmt.where(or_(*funnel_clauses))
     deals = (await session.execute(stmt)).scalars().all()
     config = await content.regulation(session)
     business_config = await business_settings.get_settings(session)

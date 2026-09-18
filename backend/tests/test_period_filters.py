@@ -256,6 +256,28 @@ def test_global_funnel_filter_uses_portal_and_funnel_id() -> None:
     with_real_data(check)
 
 
+def test_dashboard_filters_accept_multiple_values() -> None:
+    """Несколько менеджеров, юрлиц и воронок объединяются по OR внутри фильтра."""
+    async def check(s: AsyncSession) -> None:
+        rows = (await s.execute(select(Deal).order_by(Deal.position))).scalars().all()
+        rows[0].legal_entity_key = "uo"
+        rows[1].legal_entity_key = "csv"
+        rows[2].legal_entity_key = "urpase"
+        await s.commit()
+
+        selected = await metrics.period_deals(
+            s,
+            "30",
+            mgr=["Иванов", "Петров"],
+            legal_entity=["uo", "urpase"],
+            funnel=["box:10", "cloud:10"],
+        )
+
+        assert [deal.position for deal in selected] == [1, 3]
+
+    with_real_data(check)
+
+
 def test_real_funnel_uses_stage_history_and_unique_paid_deals() -> None:
     """Стадии берутся из истории, а два поступления одной сделки = одна оплата."""
     async def check(s: AsyncSession) -> None:

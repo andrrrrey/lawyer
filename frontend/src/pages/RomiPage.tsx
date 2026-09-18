@@ -51,8 +51,9 @@ function RecCard({ r }: { r: BudgetRec }) {
 
 export default function RomiPage() {
   const filters = useFilters();
-  const romiCh = useRomiChannels(filters.period, filters.legalEntity);
-  const bubble = useCampaignsBubble(filters.period, filters.legalEntity);
+  const legalEntity = filters.legalEntity[0] ?? "all";
+  const romiCh = useRomiChannels(filters.period, legalEntity);
+  const bubble = useCampaignsBubble(filters.period, legalEntity);
   const recs = useBudgetRecs();
   const mw = useMinusWords();
   const { message } = App.useApp();

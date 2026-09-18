@@ -16,6 +16,13 @@ from app.services import business_settings
 
 _MONTH_RE = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 _METRICS = ("revenue", "payments", "deals", "calls", "meetings")
+FilterValue = str | list[str]
+
+
+def _values(value: FilterValue) -> list[str]:
+    if isinstance(value, list):
+        return [item for item in value if item and item != "all"]
+    return [] if not value or value == "all" else [value]
 
 
 def _bounds(month: str) -> tuple[datetime, datetime]:
@@ -42,11 +49,13 @@ def _employee_condition(employees: list[dict[str, Any]]):
     return or_(*identities) if identities else false()
 
 
-def _funnel_condition(funnel: str):
-    source, separator, funnel_id = funnel.partition(":")
-    if funnel == "all" or not separator or not source or not funnel_id:
-        return None
-    return and_(Deal.crm_source == source, Deal.funnel_id == funnel_id)
+def _funnel_condition(funnel: FilterValue):
+    clauses = []
+    for value in _values(funnel):
+        source, separator, funnel_id = value.partition(":")
+        if separator and source and funnel_id:
+            clauses.append(and_(Deal.crm_source == source, Deal.funnel_id == funnel_id))
+    return or_(*clauses) if clauses else None
 
 
 def _completion(plan: int, fact: float) -> float | None:
@@ -57,8 +66,8 @@ async def rows(
     session: AsyncSession,
     month: str,
     *,
-    legal_entity: str = "all",
-    funnel: str = "all",
+    legal_entity: FilterValue = "all",
+    funnel: FilterValue = "all",
 ) -> list[dict[str, Any]]:
     """Возвращает настроенные планы и рассчитанный факт за один месяц."""
     start, end = _bounds(month)
@@ -73,12 +82,13 @@ async def rows(
         str(item.get("key")): str(item.get("name") or "Компания")
         for item in config.get("legal_entities", [])
     }
+    selected_entities = set(_values(legal_entity))
     result: list[dict[str, Any]] = []
     for plan in config.get("plans", []):
         if str(plan.get("period") or "") != month:
             continue
         entity_key = str(plan.get("legal_entity_key") or "")
-        if legal_entity != "all" and entity_key != legal_entity:
+        if selected_entities and entity_key not in selected_entities:
             continue
         scope_type = str(plan.get("scope_type") or "employee")
         scope_key = str(plan.get("scope_key") or plan.get("employee_key") or "")

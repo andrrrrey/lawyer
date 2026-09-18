@@ -12,12 +12,29 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AdCost, Deal, ManualExpense, OneCReceipt
 from app.services import ingest
 from app.services import period as per
+
+FilterValue = str | list[str]
+
+
+def _values(value: FilterValue) -> list[str]:
+    if isinstance(value, list):
+        return [item for item in value if item and item != "all"]
+    return [] if not value or value == "all" else [value]
+
+
+def _funnel_clause(values: FilterValue):
+    clauses = []
+    for value in _values(values):
+        crm_source, separator, funnel_id = value.partition(":")
+        if separator and crm_source and funnel_id:
+            clauses.append(and_(Deal.crm_source == crm_source, Deal.funnel_id == funnel_id))
+    return or_(*clauses) if clauses else None
 
 
 async def has_daily_costs(session: AsyncSession) -> bool:
@@ -47,10 +64,10 @@ async def for_period(
     session: AsyncSession,
     period: str,
     *,
-    mgr: str = "all",
+    mgr: FilterValue = "all",
     source: str = "all",
-    legal_entity: str = "all",
-    funnel: str = "all",
+    legal_entity: FilterValue = "all",
+    funnel: FilterValue = "all",
 ) -> list[dict] | None:
     """Каналы/кампании за период или None, если посуточного сырья ещё нет."""
     if not await has_daily_costs(session):
@@ -62,8 +79,9 @@ async def for_period(
     cost_where = [AdCost.date.is_not(None), AdCost.date >= start]
     if end is not None:
         cost_where.append(AdCost.date < end)
-    if legal_entity and legal_entity != "all":
-        cost_where.append(AdCost.legal_entity_key == legal_entity)
+    legal_values = _values(legal_entity)
+    if legal_values:
+        cost_where.append(AdCost.legal_entity_key.in_(legal_values))
     costs = (await session.execute(
         select(AdCost).where(*cost_where)
     )).scalars().all()
@@ -82,8 +100,8 @@ async def for_period(
     ]
     if end is not None:
         manual_where.append(ManualExpense.spent_at < end)
-    if legal_entity and legal_entity != "all":
-        manual_where.append(ManualExpense.legal_entity_key == legal_entity)
+    if legal_values:
+        manual_where.append(ManualExpense.legal_entity_key.in_(legal_values))
     manual = (
         await session.execute(select(ManualExpense).where(*manual_where))
     ).scalars().all()
@@ -102,19 +120,16 @@ async def for_period(
     stmt = select(Deal).where(Deal.created_at.is_not(None), Deal.created_at >= start)
     if end is not None:
         stmt = stmt.where(Deal.created_at < end)
-    if mgr and mgr != "all":
-        stmt = stmt.where(Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr)
+    manager_values = _values(mgr)
+    if manager_values:
+        stmt = stmt.where(Deal.mgr.in_(manager_values))
     if source and source != "all":
         stmt = stmt.where(Deal.src == source)
-    if legal_entity and legal_entity != "all":
-        stmt = stmt.where(Deal.legal_entity_key == legal_entity)
-    if funnel and funnel != "all":
-        crm_source, separator, funnel_id = funnel.partition(":")
-        if separator and crm_source and funnel_id:
-            stmt = stmt.where(
-                Deal.crm_source == crm_source,
-                Deal.funnel_id == funnel_id,
-            )
+    if legal_values:
+        stmt = stmt.where(Deal.legal_entity_key.in_(legal_values))
+    funnel_clause = _funnel_clause(funnel)
+    if funnel_clause is not None:
+        stmt = stmt.where(funnel_clause)
     deals = (await session.execute(stmt)).scalars().all()
 
     receipt_where = [
@@ -124,14 +139,12 @@ async def for_period(
     ]
     if end is not None:
         receipt_where.append(OneCReceipt.registrar_date < end)
-    if legal_entity and legal_entity != "all":
-        receipt_where.append(OneCReceipt.legal_entity_key == legal_entity)
-    if funnel and funnel != "all":
+    if legal_values:
+        receipt_where.append(OneCReceipt.legal_entity_key.in_(legal_values))
+    if _values(funnel):
         # Поступления без связанной сделки нельзя достоверно отнести к воронке.
-        crm_source, separator, funnel_id = funnel.partition(":")
-        if separator and crm_source and funnel_id:
-            allowed_deal_ids = {deal.id for deal in deals}
-            receipt_where.append(OneCReceipt.matched_deal_id.in_(allowed_deal_ids))
+        allowed_deal_ids = {deal.id for deal in deals}
+        receipt_where.append(OneCReceipt.matched_deal_id.in_(allowed_deal_ids))
     receipts = (
         await session.execute(select(OneCReceipt).where(*receipt_where))
     ).scalars().all()

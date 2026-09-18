@@ -8,9 +8,10 @@ import { useFilters } from "@/state/filters";
 
 export default function AnalyticsPage() {
   const f = useFilters();
-  const chain = useChain(f.period, f.legalEntity);
-  const reconciliation = useReconciliation(f.period, f.legalEntity);
-  const channels = useChannels(f.channel, f.period, f.legalEntity);
+  const legalEntity = f.legalEntity[0] ?? "all";
+  const chain = useChain(f.period, legalEntity);
+  const reconciliation = useReconciliation(f.period, legalEntity);
+  const channels = useChannels(f.channel, f.period, legalEntity);
   const money = (value: number) => `${Math.round(value).toLocaleString("ru-RU")} ₽`;
 
   return (

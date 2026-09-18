@@ -17,7 +17,7 @@ export function useDrill() {
   };
 
   const toManager = (name: string) => {
-    f.setMgr(name);
+    f.setMgr([name]);
     f.setLeadFilter(null);
     scrollToLeads();
   };

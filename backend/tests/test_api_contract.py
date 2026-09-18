@@ -74,6 +74,14 @@ def test_dashboard_leads_and_filters(client: TestClient) -> None:
     by_mgr = client.get("/api/dashboard/leads", params={"mgr": "Азалия Хаметова"}).json()
     assert all(x["mgr"] == "Азалия Хаметова" for x in by_mgr)
 
+    selected = list(dict.fromkeys(row["mgr"] for row in all_leads))[:2]
+    by_managers = client.get(
+        "/api/dashboard/leads",
+        params=[("mgr", name) for name in selected],
+    ).json()
+    assert by_managers
+    assert {row["mgr"] for row in by_managers} == set(selected)
+
 
 def test_monitor_stats(client: TestClient) -> None:
     data = client.get("/api/monitor/stats").json()

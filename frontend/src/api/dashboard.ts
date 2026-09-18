@@ -76,18 +76,22 @@ export interface Lead {
 // целиком — иначе выпадающие списки не влияли ни на что, кроме таблицы лидов.
 export interface DashFilters {
   period: string;
-  mgr: string;
+  mgr: string[];
   source: string;
-  legalEntity: string;
-  funnel: string;
+  legalEntity: string[];
+  funnel: string[];
 }
+
+const appendMany = (q: URLSearchParams, name: string, values: string[]) => {
+  values.forEach((value) => q.append(name, value));
+};
 
 const qs = (f: DashFilters) => {
   const q = new URLSearchParams({ period: f.period });
-  if (f.mgr && f.mgr !== "all") q.set("mgr", f.mgr);
+  appendMany(q, "mgr", f.mgr);
   if (f.source && f.source !== "all") q.set("source", f.source);
-  if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
-  if (f.funnel && f.funnel !== "all") q.set("funnel", f.funnel);
+  appendMany(q, "legal_entity", f.legalEntity);
+  appendMany(q, "funnel", f.funnel);
   return `?${q.toString()}`;
 };
 
@@ -119,10 +123,10 @@ export const useAttention = (f: DashFilters) =>
     // но менеджер и источник сужают выборку.
     queryFn: () => {
       const q = new URLSearchParams();
-      if (f.mgr && f.mgr !== "all") q.set("mgr", f.mgr);
+      appendMany(q, "mgr", f.mgr);
       if (f.source && f.source !== "all") q.set("source", f.source);
-      if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
-      if (f.funnel && f.funnel !== "all") q.set("funnel", f.funnel);
+      appendMany(q, "legal_entity", f.legalEntity);
+      appendMany(q, "funnel", f.funnel);
       const s = q.toString();
       return api.get(`/dashboard/attention${s ? `?${s}` : ""}`);
     },
@@ -142,7 +146,7 @@ export const useRomiByChannel = (f: DashFilters, enabled = true) =>
 
 export const useExpensesByArticle = (f: DashFilters, enabled = true) => {
   const q = new URLSearchParams({ period: f.period });
-  if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
+  appendMany(q, "legal_entity", f.legalEntity);
   return useQuery<ExpenseByArticle[]>({
     queryKey: ["dashboard", "expenses-by-article", f.period, f.legalEntity],
     queryFn: () => api.get(`/dashboard/expenses-by-article?${q.toString()}`),
@@ -161,8 +165,8 @@ export const useDepartments = (f: DashFilters) =>
 
 export const usePlanFact = (month: string, f: DashFilters) => {
   const q = new URLSearchParams({ month });
-  if (f.legalEntity && f.legalEntity !== "all") q.set("legal_entity", f.legalEntity);
-  if (f.funnel && f.funnel !== "all") q.set("funnel", f.funnel);
+  appendMany(q, "legal_entity", f.legalEntity);
+  appendMany(q, "funnel", f.funnel);
   return useQuery<PlanFactRow[]>({
     queryKey: ["dashboard", "plan-fact", month, f.legalEntity, f.funnel],
     queryFn: () => api.get(`/dashboard/plan-fact?${q.toString()}`),
@@ -170,21 +174,21 @@ export const usePlanFact = (month: string, f: DashFilters) => {
 };
 
 export const useLeads = (
-  mgr: string,
+  mgr: string[],
   source: string,
   risk: string | null,
   period: string,
-  legalEntity: string,
-  funnel: string,
+  legalEntity: string[],
+  funnel: string[],
 ) =>
   useQuery<Lead[]>({
     queryKey: ["dashboard", "leads", legalEntity, funnel, mgr, source, risk, period],
     queryFn: () => {
       const q = new URLSearchParams();
-      if (mgr && mgr !== "all") q.set("mgr", mgr);
+      appendMany(q, "mgr", mgr);
       if (source && source !== "all") q.set("source", source);
-      if (legalEntity && legalEntity !== "all") q.set("legal_entity", legalEntity);
-      if (funnel && funnel !== "all") q.set("funnel", funnel);
+      appendMany(q, "legal_entity", legalEntity);
+      appendMany(q, "funnel", funnel);
       if (risk) q.set("risk", risk);
       if (period) q.set("period", period);
       const qs = q.toString();
