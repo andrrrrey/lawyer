@@ -16,7 +16,7 @@ from app.api.deps import AuthUser, require_owner
 from app.core.config import settings as app_settings
 from app.core.db import get_session
 from app.core.security import hash_password
-from app.models import AppUser, ManualExpense, OneCReceipt
+from app.models import AppUser, ExpenseArticle, ManualExpense, OneCReceipt
 from app.services import admin, business_settings, content
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_owner)])
@@ -148,6 +148,11 @@ class ManualExpensePayload(BaseModel):
     comment: str = Field(default="", max_length=500)
 
 
+class ExpenseArticlePayload(BaseModel):
+    legal_entity_key: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+
+
 def _expense_row(row: ManualExpense) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -270,6 +275,108 @@ async def get_manual_expenses(
         )
     ).scalars().all()
     return [_expense_row(row) for row in rows]
+
+
+@router.get("/expense-articles")
+async def get_expense_articles(
+    legal_entity_key: str,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """Справочник + ранее использованные статьи.
+
+    Bitrix24 не имеет стандартного справочника расходов, а текущий endpoint 1С
+    отдаёт поступления. Если 1С начнёт передавать расходные операции с
+    operation=expense/outcome, они автоматически появятся в списке.
+    """
+    config = await business_settings.get_settings(session)
+    entity_keys = {
+        str(item.get("key")) for item in config.get("legal_entities", [])
+        if item.get("enabled", True)
+    }
+    if legal_entity_key not in entity_keys:
+        raise HTTPException(status_code=422, detail="Неизвестное юридическое лицо")
+
+    result: dict[str, dict[str, Any]] = {}
+    saved = (await session.execute(
+        select(ExpenseArticle).where(
+            ExpenseArticle.legal_entity_key == legal_entity_key
+        ).order_by(ExpenseArticle.name)
+    )).scalars().all()
+    for row in saved:
+        result[row.name.casefold()] = {
+            "id": row.id, "name": row.name, "legal_entity_key": row.legal_entity_key,
+            "source": "catalog", "source_label": "Справочник", "persisted": True,
+        }
+
+    historical = (await session.execute(
+        select(ManualExpense.article).where(
+            ManualExpense.legal_entity_key == legal_entity_key
+        ).distinct().order_by(ManualExpense.article)
+    )).scalars().all()
+    for name in historical:
+        clean = str(name or "").strip()
+        if clean:
+            result.setdefault(clean.casefold(), {
+                "id": None, "name": clean, "legal_entity_key": legal_entity_key,
+                "source": "history", "source_label": "Ранее использованные",
+                "persisted": False,
+            })
+
+    one_c = (await session.execute(
+        select(OneCReceipt.article_name).where(
+            OneCReceipt.legal_entity_key == legal_entity_key,
+            OneCReceipt.operation.in_(("expense", "outcome")),
+        ).distinct().order_by(OneCReceipt.article_name)
+    )).scalars().all()
+    for name in one_c:
+        clean = str(name or "").strip()
+        if clean:
+            result.setdefault(clean.casefold(), {
+                "id": None, "name": clean, "legal_entity_key": legal_entity_key,
+                "source": "onec", "source_label": "1С", "persisted": False,
+            })
+    return sorted(result.values(), key=lambda item: (item["source_label"], item["name"].casefold()))
+
+
+@router.post("/expense-articles", status_code=status.HTTP_201_CREATED)
+async def create_expense_article(
+    payload: ExpenseArticlePayload,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    config = await business_settings.get_settings(session)
+    entity_keys = {
+        str(item.get("key")) for item in config.get("legal_entities", [])
+        if item.get("enabled", True)
+    }
+    if payload.legal_entity_key not in entity_keys:
+        raise HTTPException(status_code=422, detail="Неизвестное юридическое лицо")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Укажите наименование статьи")
+    existing = (await session.execute(
+        select(ExpenseArticle).where(
+            ExpenseArticle.legal_entity_key == payload.legal_entity_key
+        )
+    )).scalars().all()
+    if any(row.name.casefold() == name.casefold() for row in existing):
+        raise HTTPException(status_code=409, detail="Такая статья уже есть в справочнике")
+    row = ExpenseArticle(
+        legal_entity_key=payload.legal_entity_key,
+        name=name,
+        source="manual",
+        created_at=datetime.now(UTC),
+    )
+    session.add(row)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Такая статья уже есть") from exc
+    await session.refresh(row)
+    return {
+        "id": row.id, "name": row.name, "legal_entity_key": row.legal_entity_key,
+        "source": "catalog", "source_label": "Справочник", "persisted": True,
+    }
 
 
 @router.post("/expenses", status_code=status.HTTP_201_CREATED)

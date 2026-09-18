@@ -1,4 +1,4 @@
-import { Alert, App, Button, DatePicker, Input, InputNumber, Popconfirm, Select, Spin, Switch, Table, Tabs, Tag } from "antd";
+import { Alert, App, Button, DatePicker, Input, InputNumber, Modal, Popconfirm, Select, Spin, Switch, Table, Tabs, Tag } from "antd";
 import dayjs from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -13,8 +13,10 @@ import {
   useBitrixFunnels,
   useBitrixUsers,
   useBusinessSettings,
+  useCreateExpenseArticle,
   useCreateManualExpense,
   useDeleteManualExpense,
+  useExpenseArticles,
   useManualExpenses,
   useOneCReceiptJournal,
   useSaveBusinessSettings,
@@ -38,10 +40,6 @@ export default function BusinessSettingsPage() {
   const bitrixFunnels = useBitrixFunnels();
   const bitrixUsers = useBitrixUsers();
   const save = useSaveBusinessSettings();
-  const receipts = useOneCReceiptJournal();
-  const expenses = useManualExpenses();
-  const createExpense = useCreateManualExpense();
-  const deleteExpense = useDeleteManualExpense();
   const { message } = App.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const [draft, setDraft] = useState<BusinessSettings | null>(null);
@@ -49,6 +47,15 @@ export default function BusinessSettingsPage() {
     spent_at: dayjs().format("YYYY-MM-DD"), legal_entity_key: "", article: "",
     amount: 0, include_in_romi: false, channel: "", campaign: "", comment: "",
   });
+  const [articleModalOpen, setArticleModalOpen] = useState(false);
+  const [newArticleName, setNewArticleName] = useState("");
+  const receipts = useOneCReceiptJournal();
+  const expenses = useManualExpenses();
+  const expenseEntityKey = expenseDraft.legal_entity_key || query.data?.legal_entities[0]?.key || "";
+  const expenseArticles = useExpenseArticles(expenseEntityKey);
+  const createExpenseArticle = useCreateExpenseArticle();
+  const createExpense = useCreateManualExpense();
+  const deleteExpense = useDeleteManualExpense();
 
   useEffect(() => { if (query.data) setDraft(structuredClone(query.data)); }, [query.data]);
   const dirty = useMemo(
@@ -107,6 +114,14 @@ export default function BusinessSettingsPage() {
         })),
     })).filter((group) => group.options.length);
   };
+  const expenseArticleOptions = [...new Set(
+    (expenseArticles.data ?? []).map((item) => item.source_label),
+  )].map((sourceLabel) => ({
+    label: sourceLabel,
+    options: (expenseArticles.data ?? [])
+      .filter((item) => item.source_label === sourceLabel)
+      .map((item) => ({ value: item.name, label: item.name })),
+  }));
   const planTargetOptions = (scope: Plan["scope_type"]) => {
     if (scope === "department") return departmentOptions;
     if (scope === "employee") return employeeOptions;
@@ -126,6 +141,23 @@ export default function BusinessSettingsPage() {
       message.success("Расход добавлен");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Не удалось добавить расход");
+    }
+  };
+
+  const addExpenseArticle = async () => {
+    const name = newArticleName.trim();
+    if (!name || !expenseEntityKey) return;
+    try {
+      const row = await createExpenseArticle.mutateAsync({
+        legal_entity_key: expenseEntityKey,
+        name,
+      });
+      setExpenseDraft((current) => ({ ...current, article: row.name }));
+      setNewArticleName("");
+      setArticleModalOpen(false);
+      message.success("Статья расхода создана");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось создать статью");
     }
   };
 
@@ -380,8 +412,26 @@ export default function BusinessSettingsPage() {
           <Card title="Добавить расход" subtitle="управленческие и рекламные расходы по юридическим лицам">
             <div className="setrow" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
               <div className="field"><label>Дата</label><DatePicker value={dayjs(expenseDraft.spent_at)} format="DD.MM.YYYY" onChange={(value) => value && setExpenseDraft((x) => ({ ...x, spent_at: value.format("YYYY-MM-DD") }))} /></div>
-              <div className="field"><label>Юрлицо</label><Select style={{ width: 150 }} options={entityOptions} value={expenseDraft.legal_entity_key || draft.legal_entities[0]?.key} onChange={(value) => setExpenseDraft((x) => ({ ...x, legal_entity_key: value }))} /></div>
-              <div className="field"><label>Статья расхода</label><Input style={{ width: 210 }} placeholder="Например, реклама в Авито" value={expenseDraft.article} onChange={(e) => setExpenseDraft((x) => ({ ...x, article: e.target.value }))} /></div>
+              <div className="field"><label>Юрлицо</label><Select style={{ width: 150 }} options={entityOptions} value={expenseDraft.legal_entity_key || draft.legal_entities[0]?.key} onChange={(value) => setExpenseDraft((x) => ({ ...x, legal_entity_key: value, article: "" }))} /></div>
+              <div className="field">
+                <label>Статья расхода</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    loading={expenseArticles.isLoading}
+                    style={{ width: 240 }}
+                    placeholder="Выберите статью"
+                    value={expenseDraft.article || undefined}
+                    options={expenseArticleOptions}
+                    onChange={(value) => setExpenseDraft((x) => ({ ...x, article: value }))}
+                    notFoundContent="Нет статей — создайте первую"
+                  />
+                  <Button onClick={() => setArticleModalOpen(true)}>
+                    Создать статью расхода
+                  </Button>
+                </div>
+              </div>
               <div className="field"><label>Сумма, ₽</label><InputNumber min={0.01} precision={2} style={{ width: 150 }} value={expenseDraft.amount} onChange={(value) => setExpenseDraft((x) => ({ ...x, amount: value ?? 0 }))} /></div>
               <div className="field"><label>Учитывать в ROMI</label><Switch checked={expenseDraft.include_in_romi} onChange={(value) => setExpenseDraft((x) => ({ ...x, include_in_romi: value, channel: value ? x.channel : "", campaign: value ? x.campaign : "" }))} /></div>
               <div className="field"><label>Рекламный канал</label><Input disabled={!expenseDraft.include_in_romi} style={{ width: 190 }} placeholder="Например, Авито" value={expenseDraft.channel} onChange={(e) => setExpenseDraft((x) => ({ ...x, channel: e.target.value }))} /></div>
@@ -401,6 +451,35 @@ export default function BusinessSettingsPage() {
               { title: "", render: (_, row) => <Popconfirm title="Удалить расход?" okText="Удалить" cancelText="Отмена" onConfirm={() => deleteExpense.mutateAsync(row.id).then(() => message.success("Расход удалён")).catch((e: Error) => message.error(e.message))}><Button danger size="small">Удалить</Button></Popconfirm> },
             ]} />
           </Card>
+          <Modal
+            title="Создать статью расхода"
+            open={articleModalOpen}
+            okText="Создать"
+            cancelText="Отмена"
+            confirmLoading={createExpenseArticle.isPending}
+            okButtonProps={{ disabled: !newArticleName.trim() || !expenseEntityKey }}
+            onOk={addExpenseArticle}
+            onCancel={() => { setArticleModalOpen(false); setNewArticleName(""); }}
+          >
+            <div className="field" style={{ marginTop: 16 }}>
+              <label>Юридическое лицо</label>
+              <Input
+                disabled
+                value={draft.legal_entities.find((item) => item.key === expenseEntityKey)?.name ?? expenseEntityKey}
+              />
+            </div>
+            <div className="field" style={{ marginTop: 14 }}>
+              <label>Наименование статьи</label>
+              <Input
+                autoFocus
+                maxLength={128}
+                placeholder="Например, Аренда офиса"
+                value={newArticleName}
+                onChange={(event) => setNewArticleName(event.target.value)}
+                onPressEnter={addExpenseArticle}
+              />
+            </div>
+          </Modal>
         </>
       ),
     },

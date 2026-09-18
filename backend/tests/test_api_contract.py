@@ -179,10 +179,41 @@ def test_manual_expense_crud(client: TestClient) -> None:
     listed = client.get("/api/admin/expenses").json()
     assert any(item["id"] == row["id"] for item in listed)
 
+    # Ранее использованная статья сразу доступна в выпадающем списке.
+    suggestions = client.get(
+        "/api/admin/expense-articles", params={"legal_entity_key": "uo"}
+    ).json()
+    history = next(item for item in suggestions if item["name"] == "Реклама в Авито")
+    assert history["source"] == "history" and history["persisted"] is False
+
     assert client.delete(f"/api/admin/expenses/{row['id']}").status_code == 200
     assert all(
         item["id"] != row["id"] for item in client.get("/api/admin/expenses").json()
     )
+
+
+def test_expense_article_catalog(client: TestClient) -> None:
+    created = client.post("/api/admin/expense-articles", json={
+        "legal_entity_key": "uo", "name": "  Аренда офиса  ",
+    })
+    assert created.status_code == 201
+    assert created.json()["name"] == "Аренда офиса"
+    assert created.json()["persisted"] is True
+
+    listed = client.get(
+        "/api/admin/expense-articles", params={"legal_entity_key": "uo"}
+    ).json()
+    assert any(
+        item["name"] == "Аренда офиса" and item["source"] == "catalog"
+        for item in listed
+    )
+    duplicate = client.post("/api/admin/expense-articles", json={
+        "legal_entity_key": "uo", "name": "аренда офиса",
+    })
+    assert duplicate.status_code == 409
+    assert client.get(
+        "/api/admin/expense-articles", params={"legal_entity_key": "missing"}
+    ).status_code == 422
 
 
 def test_manual_romi_expense_requires_channel(client: TestClient) -> None:

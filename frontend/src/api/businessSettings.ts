@@ -194,6 +194,36 @@ export interface ManualExpense {
 
 export type ManualExpensePayload = Omit<ManualExpense, "id">;
 
+export interface ExpenseArticle {
+  id: number | null;
+  name: string;
+  legal_entity_key: string;
+  source: "catalog" | "history" | "onec";
+  source_label: string;
+  persisted: boolean;
+}
+
+export function useExpenseArticles(legalEntityKey: string) {
+  return useQuery<ExpenseArticle[]>({
+    queryKey: ["admin", "expense-articles", legalEntityKey],
+    queryFn: () => api.get(
+      `/admin/expense-articles?legal_entity_key=${encodeURIComponent(legalEntityKey)}`,
+    ),
+    enabled: Boolean(legalEntityKey),
+  });
+}
+
+export function useCreateExpenseArticle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { legal_entity_key: string; name: string }) =>
+      api.post<ExpenseArticle>("/admin/expense-articles", payload),
+    onSuccess: (row) => {
+      qc.invalidateQueries({ queryKey: ["admin", "expense-articles", row.legal_entity_key] });
+    },
+  });
+}
+
 export function useManualExpenses() {
   return useQuery<ManualExpense[]>({
     queryKey: ["admin", "expenses"],

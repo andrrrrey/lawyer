@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -124,6 +125,23 @@ class ManualExpense(Base):
     channel: Mapped[str] = mapped_column(String(128), default="")
     campaign: Mapped[str] = mapped_column(String(128), default="")
     comment: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExpenseArticle(Base):
+    """Пользовательский справочник статей расходов по юрлицам."""
+
+    __tablename__ = "expense_articles"
+    __table_args__ = (
+        UniqueConstraint(
+            "legal_entity_key", "name", name="uq_expense_article_entity_name"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
