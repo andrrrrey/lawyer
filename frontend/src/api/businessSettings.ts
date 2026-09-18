@@ -49,6 +49,8 @@ export interface Plan {
   scope_type: "company" | "department" | "employee";
   scope_key: string;
   legal_entity_key: string;
+  funnel: string;
+  lead_source: string;
   period: string;
   revenue: number;
   payments: number;

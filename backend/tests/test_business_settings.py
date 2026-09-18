@@ -51,6 +51,24 @@ def test_funnel_references_are_validated() -> None:
         validate_settings(data)
 
 
+def test_plan_funnel_must_belong_to_selected_legal_entity() -> None:
+    data = deepcopy(BUSINESS_SETTINGS)
+    data["funnels"] = [{
+        "key": "box_10", "external_id": "10", "name": "Воронка ЮО",
+        "crm_source": "box", "legal_entity_key": "uo",
+        "sla_profile_key": "default", "entity_type": "deal", "enabled": True,
+    }]
+    data["plans"] = [{
+        "key": "bad_plan", "scope_type": "company", "scope_key": "csv",
+        "legal_entity_key": "csv", "funnel": "box:10", "lead_source": "Сайт",
+        "period": "2026-09", "revenue": 0, "payments": 0, "deals": 0,
+        "calls": 0, "meetings": 0,
+    }]
+
+    with pytest.raises(ValueError, match="другому юридическому лицу"):
+        validate_settings(data)
+
+
 def test_employee_names_are_scoped_by_bitrix_connection() -> None:
     data = deepcopy(BUSINESS_SETTINGS)
     data["employees"] = [

@@ -39,7 +39,11 @@ export function PlanFactTable({ rows, financial = true }: { rows: PlanFactRow[];
           <tbody>
             {rows.map((row) => (
               <tr key={row.key}>
-                <td><b>{row.scope_name}</b><div className="sub">{row.legal_entity_name}</div></td>
+                <td>
+                  <b>{row.scope_name}</b>
+                  <div className="sub">{row.legal_entity_name}</div>
+                  <div className="sub">{row.funnel_name} · {row.lead_source}</div>
+                </td>
                 {metrics.map((item) => <Metric key={item.key} row={row} metric={item.key} money={item.money} />)}
                 <td><span className={`tag ${row.overall_completion !== null && row.overall_completion >= 100 ? "t-green" : "t-amber"}`}>{row.overall_completion === null ? "—" : `${row.overall_completion}%`}</span></td>
               </tr>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useCreateTask, useMonitorStats, useReview, useViolations } from "@/api/monitor";
+import { useFilterOptions } from "@/api/dashboard";
 import { ViolationRow } from "@/components/ViolationRow";
 
 const PTYPE_LABEL: Record<string, string> = {
@@ -39,13 +40,21 @@ export default function MonitorPage() {
   const sev = params.get("sev");
   const dateFrom = params.get("date_from");
   const dateTo = params.get("date_to");
+  const legalEntities = params.getAll("legal_entity");
+  const funnels = params.getAll("funnel");
+  const legalScopeKey = legalEntities.join("|");
+  const funnelScopeKey = funnels.join("|");
   const isReviewFilter = filter === "spam" || filter === "refusal" || sev === "review";
 
-  const stats = useMonitorStats();
+  const scope = { legalEntities, funnels };
+  const filterOptions = useFilterOptions();
+  const stats = useMonitorStats(scope);
   // Список regular тянем целиком (по ptype), а фильтр по серьёзности применяем на
   // клиенте — severity уже есть в каждой строке, отдельный запрос не нужен.
-  const violations = useViolations({ ptype: filter, dateFrom, dateTo });
-  const review = useReview();
+  const violations = useViolations({
+    ptype: filter, dateFrom, dateTo, legalEntities, funnels,
+  });
+  const review = useReview(scope);
   const createTask = useCreateTask();
   const { message } = App.useApp();
   const [done, setDone] = useState<Set<string>>(new Set());
@@ -76,8 +85,12 @@ export default function MonitorPage() {
     reviewPage * PAGE_SIZE, reviewPage * PAGE_SIZE + PAGE_SIZE) ?? [];
 
   // Сброс страниц при смене фильтра или объёма данных.
-  useEffect(() => { setPage(0); }, [filter, sev, dateFrom, dateTo, total]);
-  useEffect(() => { setReviewPage(0); }, [filter, reviewTotal]);
+  useEffect(() => {
+    setPage(0);
+  }, [filter, sev, dateFrom, dateTo, legalScopeKey, funnelScopeKey, total]);
+  useEffect(() => {
+    setReviewPage(0);
+  }, [filter, legalScopeKey, funnelScopeKey, reviewTotal]);
 
   const updateParams = (mutate: (next: URLSearchParams) => void) => {
     const next = new URLSearchParams(params);
@@ -94,6 +107,13 @@ export default function MonitorPage() {
     next.delete("ptype");
     next.delete("date_from");
     next.delete("date_to");
+    next.delete("legal_entity");
+    next.delete("funnel");
+  });
+
+  const setMultiParam = (key: string, values: string[]) => updateParams((next) => {
+    next.delete(key);
+    values.forEach((value) => next.append(key, value));
   });
 
   // Верхняя плашка задаёт серьёзность, но не сбрасывает тип и дату:
@@ -186,6 +206,32 @@ export default function MonitorPage() {
             />
           </div>
           <div className="violation-filter-field">
+            <span>Компания</span>
+            <Select
+              mode="multiple"
+              allowClear
+              maxTagCount="responsive"
+              value={legalEntities}
+              placeholder="Все компании"
+              options={filterOptions.data?.legal_entities ?? []}
+              style={{ width: 240 }}
+              onChange={(values) => setMultiParam("legal_entity", values)}
+            />
+          </div>
+          <div className="violation-filter-field">
+            <span>Воронка</span>
+            <Select
+              mode="multiple"
+              allowClear
+              maxTagCount="responsive"
+              value={funnels}
+              placeholder="Все воронки"
+              options={filterOptions.data?.funnels ?? []}
+              style={{ width: 280 }}
+              onChange={(values) => setMultiParam("funnel", values)}
+            />
+          </div>
+          <div className="violation-filter-field">
             <span>Дата события</span>
             <DatePicker.RangePicker
               value={dateFrom && dateTo ? [dayjs(dateFrom), dayjs(dateTo)] : null}
@@ -205,7 +251,7 @@ export default function MonitorPage() {
           </div>
           <div className="violation-filter-summary">
             <span>Найдено: <b>{total}</b></span>
-            {filter || dateFrom || dateTo ? (
+            {filter || dateFrom || dateTo || legalEntities.length || funnels.length ? (
               <Button type="link" size="small" onClick={clearListFilters}>Сбросить</Button>
             ) : null}
           </div>
@@ -256,7 +302,15 @@ export default function MonitorPage() {
           </div>
           <div className="deal-list">
             {reviewTotal ? (
-              reviewRows.map((v, i) => <ReviewRow key={reviewPage * PAGE_SIZE + i} v={v} />)
+              reviewRows.map((v, i) => (
+                <ReviewRow
+                  key={reviewPage * PAGE_SIZE + i}
+                  v={v}
+                  onTask={onTask}
+                  taskPending={createTask.isPending}
+                  taskDone={done.has(v.deal_key)}
+                />
+              ))
             ) : (
               <div className="empty-note">Нет оценочных нарушений на проверке</div>
             )}
@@ -283,7 +337,12 @@ export default function MonitorPage() {
   );
 }
 
-function ReviewRow({ v }: { v: import("@/api/monitor").Violation }) {
+function ReviewRow({ v, onTask, taskPending, taskDone }: {
+  v: import("@/api/monitor").Violation;
+  onTask: (dealKey: string) => void;
+  taskPending: boolean;
+  taskDone: boolean;
+}) {
   const { message } = App.useApp();
   return (
     <div className="deal">
@@ -303,8 +362,14 @@ function ReviewRow({ v }: { v: import("@/api/monitor").Violation }) {
         <Button size="small" onClick={() => message.success("Помечено как обоснованное")}>
           Обоснованно
         </Button>
-        <Button type="primary" size="small" onClick={() => message.success("Задача руководителю поставлена")}>
-          На разбор
+        <Button
+          type="primary"
+          size="small"
+          loading={taskPending}
+          disabled={taskDone}
+          onClick={() => onTask(v.deal_key)}
+        >
+          {taskDone ? "Задача создана" : "На разбор"}
         </Button>
       </div>
     </div>

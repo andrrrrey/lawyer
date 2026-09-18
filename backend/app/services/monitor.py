@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
@@ -18,6 +18,33 @@ from app.models import Deal, Task
 from app.services import content, tasks_engine
 from app.services import format as f
 from app.services import violations as vio
+
+FilterValue = str | list[str]
+
+
+def _values(value: FilterValue) -> list[str]:
+    if isinstance(value, list):
+        return [item for item in value if item and item != "all"]
+    return [] if not value or value == "all" else [value]
+
+
+def _scope_stmt(stmt, mgr: FilterValue, legal_entity: FilterValue, funnel: FilterValue):
+    managers = _values(mgr)
+    if managers:
+        stmt = stmt.where(Deal.mgr.in_(managers))
+    entities = _values(legal_entity)
+    if entities:
+        stmt = stmt.where(Deal.legal_entity_key.in_(entities))
+    funnel_clauses = []
+    for value in _values(funnel):
+        crm_source, separator, funnel_id = value.partition(":")
+        if separator and crm_source and funnel_id:
+            funnel_clauses.append(and_(
+                Deal.crm_source == crm_source, Deal.funnel_id == funnel_id,
+            ))
+    if funnel_clauses:
+        stmt = stmt.where(or_(*funnel_clauses))
+    return stmt
 
 
 def _with_amount_display(items: list[dict]) -> list[dict]:
@@ -30,8 +57,12 @@ async def stats(
     session: AsyncSession,
     mgr: str | list[str] = "all",
     hide_financial: bool = False,
+    legal_entity: FilterValue = "all",
+    funnel: FilterValue = "all",
 ) -> dict:
-    res = await vio.evaluate_current(session, mgr=mgr)
+    res = await vio.evaluate_current(
+        session, mgr=mgr, legal_entity=legal_entity, funnel=funnel,
+    )
     regular = res["regular"]
     review = res["review"]
     over = [v for v in regular if v["severity"] == "over"]
@@ -40,11 +71,9 @@ async def stats(
 
     # «В норме» — доля сделок без нарушений (движок выдаёт не более одного
     # нарушения на сделку, поэтому len(regular) ≈ число проблемных сделок).
-    total_stmt = select(func.count()).select_from(Deal)
-    if mgr != "all":
-        total_stmt = total_stmt.where(
-            Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr
-        )
+    total_stmt = _scope_stmt(
+        select(func.count()).select_from(Deal), mgr, legal_entity, funnel,
+    )
     total = await session.scalar(total_stmt) or 0
     if total:
         norm = f"{round(max(total - len(regular), 0) / total * 100)}%"
@@ -69,8 +98,11 @@ async def violations(
     session: AsyncSession, ptype: str | None = None, mgr: str | list[str] = "all",
     hide_financial: bool = False, date_from: date | None = None,
     date_to: date | None = None,
+    legal_entity: FilterValue = "all", funnel: FilterValue = "all",
 ) -> list[dict]:
-    res = await vio.evaluate_current(session, mgr=mgr)
+    res = await vio.evaluate_current(
+        session, mgr=mgr, legal_entity=legal_entity, funnel=funnel,
+    )
     regular = res["regular"]
     if ptype:
         regular = [v for v in regular if v["ptype"] == ptype]
@@ -93,8 +125,11 @@ async def violations(
 
 async def review(
     session: AsyncSession, mgr: str | list[str] = "all", hide_financial: bool = False,
+    legal_entity: FilterValue = "all", funnel: FilterValue = "all",
 ) -> list[dict]:
-    res = await vio.evaluate_current(session, mgr=mgr)
+    res = await vio.evaluate_current(
+        session, mgr=mgr, legal_entity=legal_entity, funnel=funnel,
+    )
     result = _with_amount_display(res["review"])
     if hide_financial:
         for row in result:

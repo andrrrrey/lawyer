@@ -254,6 +254,7 @@ async def get_departments(
 @router.get("/plan-fact")
 async def get_plan_fact(
     month: str | None = None,
+    source: str = "all",
     legal_entity: list[str] = Query(default=[]),
     funnel: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
@@ -263,7 +264,7 @@ async def get_plan_fact(
     try:
         result = await plan_fact.rows(
             session, selected_month, legal_entity=_multi(legal_entity),
-            funnel=_multi(funnel)
+            funnel=_multi(funnel), source=source,
         )
         if user.role == "manager":
             result = [

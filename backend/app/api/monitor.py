@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthUser, require_session
@@ -13,6 +13,10 @@ from app.core.db import get_session
 from app.services import business_settings, monitor
 
 router = APIRouter(prefix="/monitor", tags=["monitor"], dependencies=[Depends(require_session)])
+
+
+def _multi(values: list[str]) -> str | list[str]:
+    return values or "all"
 
 
 async def _manager_scope(session: AsyncSession, user: AuthUser) -> str | list[str]:
@@ -37,14 +41,20 @@ async def _manager_scope(session: AsyncSession, user: AuthUser) -> str | list[st
 
 @router.get("/stats")
 async def get_stats(
+    legal_entity: list[str] = Query(default=[]),
+    funnel: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session), user: AuthUser = Depends(require_session),
 ) -> dict[str, Any]:
-    return await monitor.stats(session, await _manager_scope(session, user), user.role == "manager")
+    return await monitor.stats(
+        session, await _manager_scope(session, user), user.role == "manager",
+        legal_entity=_multi(legal_entity), funnel=_multi(funnel),
+    )
 
 
 @router.get("/violations")
 async def get_violations(
     ptype: str | None = None, date_from: date | None = None, date_to: date | None = None,
+    legal_entity: list[str] = Query(default=[]), funnel: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
     user: AuthUser = Depends(require_session),
 ) -> list[dict[str, Any]]:
@@ -56,15 +66,19 @@ async def get_violations(
     return await monitor.violations(
         session, ptype=ptype, mgr=await _manager_scope(session, user),
         hide_financial=user.role == "manager", date_from=date_from, date_to=date_to,
+        legal_entity=_multi(legal_entity), funnel=_multi(funnel),
     )
 
 
 @router.get("/review")
 async def get_review(
+    legal_entity: list[str] = Query(default=[]),
+    funnel: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session), user: AuthUser = Depends(require_session),
 ) -> list[dict[str, Any]]:
     return await monitor.review(
-        session, mgr=await _manager_scope(session, user), hide_financial=user.role == "manager"
+        session, mgr=await _manager_scope(session, user), hide_financial=user.role == "manager",
+        legal_entity=_multi(legal_entity), funnel=_multi(funnel),
     )
 
 

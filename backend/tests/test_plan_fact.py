@@ -43,8 +43,14 @@ def test_plan_fact_for_all_scope_levels() -> None:
                     "bitrix_user_id": "12", "legal_entity_key": "uo",
                     "department_key": "sales", "enabled": True,
                 }]
+                config["funnels"] = [{
+                    "key": "box_10", "external_id": "10", "name": "Основная воронка",
+                    "crm_source": "box", "legal_entity_key": "uo",
+                    "sla_profile_key": "default", "entity_type": "deal", "enabled": True,
+                }]
                 base_plan = {
                     "period": "2026-09", "legal_entity_key": "uo",
+                    "funnel": "box:10", "lead_source": "Сайт",
                     "revenue": 200_000, "payments": 2, "deals": 2,
                     "calls": 4, "meetings": 2,
                 }
@@ -88,6 +94,8 @@ def test_plan_fact_for_all_scope_levels() -> None:
                     "company", "department", "employee"
                 }
                 for row in rows:
+                    assert row["funnel_name"] == "Основная воронка"
+                    assert row["lead_source"] == "Сайт"
                     assert row["fact"] == {
                         "revenue": 100_000.0, "payments": 1, "deals": 1,
                         "calls": 2, "meetings": 1,

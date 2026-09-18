@@ -23,6 +23,7 @@ import {
 } from "@/api/businessSettings";
 import AdminPage from "@/pages/AdminPage";
 import { UsersSettings } from "@/components/UsersSettings";
+import { useFilterOptions } from "@/api/dashboard";
 
 const uid = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -39,6 +40,7 @@ export default function BusinessSettingsPage() {
   const query = useBusinessSettings();
   const bitrixFunnels = useBitrixFunnels();
   const bitrixUsers = useBitrixUsers();
+  const dashboardFilters = useFilterOptions();
   const save = useSaveBusinessSettings();
   const { message } = App.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -127,6 +129,16 @@ export default function BusinessSettingsPage() {
     if (scope === "employee") return employeeOptions;
     return [];
   };
+  const planFunnelOptions = (entityKey: string) => draft.funnels
+    .filter((item) => item.enabled && item.legal_entity_key === entityKey)
+    .map((item) => ({
+      value: `${item.crm_source}:${item.external_id}`,
+      label: item.name,
+    }));
+  const savedPlanSources = draft.plans.map((plan) => plan.lead_source).filter(Boolean);
+  const planSourceOptions = [...new Set([
+    ...(dashboardFilters.data?.sources ?? []), ...savedPlanSources,
+  ])].map((value) => ({ value, label: value }));
 
   const addExpense = async () => {
     const payload = {
@@ -547,7 +559,7 @@ export default function BusinessSettingsPage() {
             })}
             <Button disabled={!bitrixPeople.size} onClick={() => mutate((x) => x.employees.push({ key: uid("employee"), name: "", crm_source: "", bitrix_user_id: "", legal_entity_key: "", department_key: "", enabled: true }))}>Добавить сотрудника</Button>
           </Card>
-          <Card title="Планы" subtitle="на компанию, отдел или сотрудника; факт рассчитывается автоматически">
+          <Card title="Планы" subtitle="по компании, отделу или сотруднику; при необходимости — по воронке и источнику">
             {draft.plans.map((row, index) => (
               <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}>
                 <Select
@@ -582,7 +594,30 @@ export default function BusinessSettingsPage() {
                   onChange={(value) => mutate((x) => {
                     x.plans[index].legal_entity_key = value;
                     if (x.plans[index].scope_type === "company") x.plans[index].scope_key = value;
+                    if (!planFunnelOptions(value).some((option) => option.value === x.plans[index].funnel)) {
+                      x.plans[index].funnel = "";
+                    }
                   })}
+                />
+                <Select
+                  style={{ width: 230 }}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Все воронки"
+                  options={planFunnelOptions(row.legal_entity_key)}
+                  value={row.funnel || undefined}
+                  onChange={(value) => mutate((x) => { x.plans[index].funnel = value ?? ""; })}
+                />
+                <Select
+                  style={{ width: 210 }}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Все источники"
+                  options={planSourceOptions}
+                  value={row.lead_source || undefined}
+                  onChange={(value) => mutate((x) => { x.plans[index].lead_source = value ?? ""; })}
                 />
                 <DatePicker
                   picker="month"
@@ -605,6 +640,7 @@ export default function BusinessSettingsPage() {
               x.plans.push({
                 key: uid("plan"), scope_type: "company", scope_key: entity,
                 legal_entity_key: entity, period: new Date().toISOString().slice(0, 7),
+                funnel: "", lead_source: "",
                 revenue: 0, payments: 0, deals: 0, calls: 0, meetings: 0,
               });
             })}>Добавить план</Button>

@@ -321,6 +321,14 @@ def _minutes(value: float) -> str:
     return f"{text} мин"
 
 
+def _trimmed_mean(values: list[int], fraction: float = 0.2) -> tuple[float, int]:
+    """Среднее без нижних и верхних 20%; на малой выборке — обычное среднее."""
+    ordered = sorted(values)
+    trim = int(len(ordered) * fraction) if len(ordered) >= 5 else 0
+    sample = ordered[trim:len(ordered) - trim] if trim else ordered
+    return (sum(sample) / len(sample), len(sample)) if sample else (0.0, 0)
+
+
 async def _business_kpi_cards(
     session: AsyncSession,
     period: str,
@@ -351,9 +359,9 @@ async def _business_kpi_cards(
             expected.append(deal)
 
     won = [deal for deal in rows if deal.status_class == "st-ok" and deal.amount]
-    average_contract = (
-        sum(int(deal.amount or 0) for deal in won) / len(won) if won else 0
-    )
+    average_contract, contract_sample_size = _trimmed_mean([
+        int(deal.amount or 0) for deal in won
+    ])
 
     now = datetime.now(UTC)
     receipt_stmt = select(OneCReceipt).where(
@@ -418,7 +426,10 @@ async def _business_kpi_cards(
             "icon": "i-cyan", "svg": '<path d="M5 4h14v16H5zM8 9h8M8 13h8"/>',
             "kind": "money", "value": average_contract,
             "display": f.money_short(average_contract) if average_contract else "—",
-            "delta": f"{len(won)} продаж",
+            "delta": (
+                f"{contract_sample_size} из {len(won)} продаж"
+                if contract_sample_size != len(won) else f"{len(won)} продаж"
+            ),
         },
         {
             **common, "key": "average_receipt", "label": "Средняя сумма поступления",

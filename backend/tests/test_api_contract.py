@@ -117,6 +117,16 @@ def test_monitor_violation_date_range_validation(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_monitor_accepts_company_and_funnel_filters(client: TestClient) -> None:
+    params = [
+        ("legal_entity", "uo"), ("legal_entity", "csv"),
+        ("funnel", "box:10"), ("funnel", "cloud:20"),
+    ]
+    assert client.get("/api/monitor/stats", params=params).status_code == 200
+    assert client.get("/api/monitor/violations", params=params).status_code == 200
+    assert client.get("/api/monitor/review", params=params).status_code == 200
+
+
 def test_monitor_review(client: TestClient) -> None:
     data = client.get("/api/monitor/review").json()
     assert len(data) == 2

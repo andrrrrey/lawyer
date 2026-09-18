@@ -68,6 +68,7 @@ async def rows(
     *,
     legal_entity: FilterValue = "all",
     funnel: FilterValue = "all",
+    source: str = "all",
 ) -> list[dict[str, Any]]:
     """Возвращает настроенные планы и рассчитанный факт за один месяц."""
     start, end = _bounds(month)
@@ -83,12 +84,19 @@ async def rows(
         for item in config.get("legal_entities", [])
     }
     selected_entities = set(_values(legal_entity))
+    selected_funnels = set(_values(funnel))
     result: list[dict[str, Any]] = []
     for plan in config.get("plans", []):
         if str(plan.get("period") or "") != month:
             continue
         entity_key = str(plan.get("legal_entity_key") or "")
         if selected_entities and entity_key not in selected_entities:
+            continue
+        plan_funnel = str(plan.get("funnel") or "").strip()
+        plan_source = str(plan.get("lead_source") or "").strip()
+        if selected_funnels and plan_funnel not in selected_funnels:
+            continue
+        if source != "all" and plan_source != source:
             continue
         scope_type = str(plan.get("scope_type") or "employee")
         scope_key = str(plan.get("scope_key") or plan.get("employee_key") or "")
@@ -114,9 +122,11 @@ async def rows(
             Deal.created_at >= start,
             Deal.created_at <= end,
         ]
-        funnel_condition = _funnel_condition(funnel)
+        funnel_condition = _funnel_condition(plan_funnel or funnel)
         if funnel_condition is not None:
             deal_conditions.append(funnel_condition)
+        if plan_source:
+            deal_conditions.append(Deal.src == plan_source)
         if scope_type != "company":
             deal_conditions.append(_employee_condition(scoped_employees))
 
@@ -139,6 +149,8 @@ async def rows(
         ]
         if funnel_condition is not None:
             activity_conditions.append(funnel_condition)
+        if plan_source:
+            activity_conditions.append(Deal.src == plan_source)
         if scope_type != "company":
             activity_conditions.append(_employee_condition(scoped_employees))
         activity_counts = dict((await session.execute(
@@ -159,13 +171,15 @@ async def rows(
             func.count(OneCReceipt.id),
             func.coalesce(func.sum(OneCReceipt.amount), 0),
         )
-        if scope_type != "company" or funnel_condition is not None:
+        if scope_type != "company" or funnel_condition is not None or plan_source:
             receipt_stmt = receipt_stmt.join(
                 Deal, OneCReceipt.matched_deal_id == Deal.id
             )
             receipt_conditions.append(Deal.legal_entity_key == entity_key)
             if funnel_condition is not None:
                 receipt_conditions.append(funnel_condition)
+            if plan_source:
+                receipt_conditions.append(Deal.src == plan_source)
             if scope_type != "company":
                 receipt_conditions.append(_employee_condition(scoped_employees))
         receipt_count, receipt_amount = (await session.execute(
@@ -195,6 +209,11 @@ async def rows(
             "scope_name": scope_name,
             "legal_entity_key": entity_key,
             "legal_entity_name": entities.get(entity_key, entity_key),
+            "funnel": plan_funnel,
+            "funnel_name": business_settings.funnel_name(
+                config, *plan_funnel.split(":", 1)
+            ) if ":" in plan_funnel else "Все воронки",
+            "lead_source": plan_source or "Все источники",
             "month": month,
             "plan": targets,
             "fact": fact,

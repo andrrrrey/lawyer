@@ -221,6 +221,14 @@ def test_expected_averages_and_deal_cycle_are_real() -> None:
     with_real_data(check)
 
 
+def test_average_contract_trims_lower_and_upper_twenty_percent() -> None:
+    values = [10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 1_000_000]
+    average, sample_size = metrics._trimmed_mean(values)
+
+    assert average == 55_000
+    assert sample_size == 6
+
+
 def test_sources_donut_follows_filters() -> None:
     """Диаграмма считает только лиды и не дублирует их сделками."""
     async def check(s: AsyncSession) -> None:

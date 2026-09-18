@@ -77,7 +77,7 @@ export default function AnalyticsPage() {
               columns={[
                 { title: "Воронка Bitrix24", dataIndex: "name" },
                 { title: "Создано сделок", dataIndex: "deals", align: "right" },
-                { title: "Успешных сейчас", dataIndex: "successful_deals", align: "right" },
+                { title: "Сейчас успешных из созданных", dataIndex: "successful_deals", align: "right" },
                 { title: "Сумма успешных", dataIndex: "successful_amount", align: "right", render: money },
               ]}
             />

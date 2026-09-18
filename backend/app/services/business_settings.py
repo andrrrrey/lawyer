@@ -142,7 +142,14 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
         if department_key and department_key not in department_keys:
             raise ValueError("Сотрудник ссылается на неизвестный отдел")
 
-    plan_keys: set[tuple[str, str, str, str]] = set()
+    funnel_entities = {
+        f"{item.get('crm_source')}:{item.get('external_id')}": str(item.get("legal_entity_key"))
+        for item in funnels
+        if item.get("enabled", True)
+        and item.get("crm_source")
+        and item.get("external_id") is not None
+    }
+    plan_keys: set[tuple[str, str, str, str, str, str]] = set()
     for plan in result["plans"]:
         entity_key = str(plan.get("legal_entity_key", ""))
         if entity_key not in entity_keys:
@@ -159,8 +166,18 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Период плана должен быть в формате ГГГГ-ММ")
         plan["scope_type"] = scope_type
         plan["scope_key"] = entity_key if scope_type == "company" else scope_key
+        plan_funnel = str(plan.get("funnel") or "").strip()
+        if plan_funnel and plan_funnel not in funnel_entities:
+            raise ValueError("План ссылается на неизвестную воронку")
+        if plan_funnel and funnel_entities[plan_funnel] != entity_key:
+            raise ValueError("Воронка плана относится к другому юридическому лицу")
+        plan["funnel"] = plan_funnel
+        plan["lead_source"] = str(plan.get("lead_source") or "").strip()[:128]
         plan.pop("employee_key", None)
-        identity = (entity_key, scope_type, plan["scope_key"], str(plan["period"]))
+        identity = (
+            entity_key, scope_type, plan["scope_key"], str(plan["period"]),
+            plan_funnel, plan["lead_source"],
+        )
         if identity in plan_keys:
             raise ValueError("Для выбранного уровня уже задан план на этот месяц")
         plan_keys.add(identity)

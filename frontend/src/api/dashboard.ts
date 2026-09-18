@@ -47,6 +47,9 @@ export interface PlanFactRow {
   scope_type: "company" | "department" | "employee";
   scope_name: string;
   legal_entity_name: string;
+  funnel: string;
+  funnel_name: string;
+  lead_source: string;
   month: string;
   plan: PlanFactValues;
   fact: PlanFactValues;
@@ -167,8 +170,9 @@ export const usePlanFact = (month: string, f: DashFilters) => {
   const q = new URLSearchParams({ month });
   appendMany(q, "legal_entity", f.legalEntity);
   appendMany(q, "funnel", f.funnel);
+  if (f.source && f.source !== "all") q.set("source", f.source);
   return useQuery<PlanFactRow[]>({
-    queryKey: ["dashboard", "plan-fact", month, f.legalEntity, f.funnel],
+    queryKey: ["dashboard", "plan-fact", month, f.legalEntity, f.funnel, f.source],
     queryFn: () => api.get(`/dashboard/plan-fact?${q.toString()}`),
   });
 };
