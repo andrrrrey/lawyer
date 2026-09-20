@@ -52,6 +52,7 @@ def deal_row(deal: Deal) -> dict:
     """Сделка из БД → запись в форме, которую ждёт агрегатор конвейера."""
     return {
         "campaign": deal.campaign,
+        "source": deal.src,
         "external_id": deal.external_id,
         "amount": int(deal.amount or 0),
         # Семантика успеха в БД хранится классом статуса (см. ingest._stage_class).
@@ -110,6 +111,9 @@ async def for_period(
             "campaign": row.campaign or row.article,
             "campaign_id": None,
             "channel": row.channel,
+            # Для ручного рекламного расхода channel хранит выбранный SOURCE_ID
+            # сделки. Название поля оставлено для обратной совместимости API/БД.
+            "source": row.channel,
             "spend": round(row.amount),
             "clicks": 0,
             "impressions": 0,

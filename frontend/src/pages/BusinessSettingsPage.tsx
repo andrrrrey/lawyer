@@ -139,6 +139,12 @@ export default function BusinessSettingsPage() {
   const planSourceOptions = [...new Set([
     ...(dashboardFilters.data?.sources ?? []), ...savedPlanSources,
   ])].map((value) => ({ value, label: value }));
+  const savedExpenseSources = (expenses.data ?? [])
+    .map((expense) => expense.channel)
+    .filter(Boolean);
+  const expenseSourceOptions = [...new Set([
+    ...(dashboardFilters.data?.sources ?? []), ...savedExpenseSources,
+  ])].map((value) => ({ value, label: value }));
 
   const addExpense = async () => {
     const payload = {
@@ -419,7 +425,7 @@ export default function BusinessSettingsPage() {
             showIcon
             style={{ marginBottom: 16 }}
             message="Расходы Яндекс Директа загружаются автоматически"
-            description="Вручную добавляйте другие статьи и корректировки. В ROMI попадут только строки с включённым признаком «Учитывать в ROMI» и указанным рекламным каналом. Не дублируйте здесь расход, уже полученный из Директа."
+            description="Вручную добавляйте другие статьи и корректировки. Для сквозной аналитики включите «Учитывать в ROMI» и выберите источник привлечения из Bitrix24. Не дублируйте здесь расход, уже полученный из Директа."
           />
           <Card title="Добавить расход" subtitle="управленческие и рекламные расходы по юридическим лицам">
             <div className="setrow" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -446,7 +452,22 @@ export default function BusinessSettingsPage() {
               </div>
               <div className="field"><label>Сумма, ₽</label><InputNumber min={0.01} precision={2} style={{ width: 150 }} value={expenseDraft.amount} onChange={(value) => setExpenseDraft((x) => ({ ...x, amount: value ?? 0 }))} /></div>
               <div className="field"><label>Учитывать в ROMI</label><Switch checked={expenseDraft.include_in_romi} onChange={(value) => setExpenseDraft((x) => ({ ...x, include_in_romi: value, channel: value ? x.channel : "", campaign: value ? x.campaign : "" }))} /></div>
-              <div className="field"><label>Рекламный канал</label><Input disabled={!expenseDraft.include_in_romi} style={{ width: 190 }} placeholder="Например, Авито" value={expenseDraft.channel} onChange={(e) => setExpenseDraft((x) => ({ ...x, channel: e.target.value }))} /></div>
+              <div className="field">
+                <label>Источник привлечения</label>
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  disabled={!expenseDraft.include_in_romi}
+                  loading={dashboardFilters.isLoading}
+                  style={{ width: 240 }}
+                  placeholder="Выберите источник из Bitrix24"
+                  value={expenseDraft.channel || undefined}
+                  options={expenseSourceOptions}
+                  onChange={(value) => setExpenseDraft((x) => ({ ...x, channel: value ?? "" }))}
+                  notFoundContent="Источники появятся после загрузки сделок из Bitrix24"
+                />
+              </div>
               <div className="field"><label>Кампания</label><Input disabled={!expenseDraft.include_in_romi} style={{ width: 180 }} placeholder="Необязательно" value={expenseDraft.campaign} onChange={(e) => setExpenseDraft((x) => ({ ...x, campaign: e.target.value }))} /></div>
               <div className="field"><label>Комментарий</label><Input style={{ width: 220 }} placeholder="Необязательно" value={expenseDraft.comment} onChange={(e) => setExpenseDraft((x) => ({ ...x, comment: e.target.value }))} /></div>
               <Button type="primary" loading={createExpense.isPending} disabled={!expenseDraft.article.trim() || expenseDraft.amount <= 0 || (expenseDraft.include_in_romi && !expenseDraft.channel.trim())} onClick={addExpense}>Добавить</Button>

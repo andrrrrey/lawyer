@@ -275,6 +275,7 @@ def aggregate_channels(
             total["count"] = int(total["count"]) + 1
     channels: dict[str, dict] = {}
     camp_index: dict[str, dict] = {}  # ключ (id/имя) → запись кампании
+    source_index: dict[str, dict] = {}  # SOURCE_ID Bitrix → ручной расход
 
     for row in direct_costs:
         camp = row.get("campaign", "")
@@ -283,6 +284,7 @@ def aggregate_channels(
         # Для Директа канал определяется по названию кампании. Ручной расход
         # может явно задать канал (VK, Авито, наружная реклама и т. п.).
         explicit_channel = str(row.get("channel") or "").strip()
+        explicit_source = str(row.get("source") or "").strip()
         ch_name, color = channel_for_campaign(camp)
         if explicit_channel:
             ch_name = explicit_channel
@@ -303,16 +305,24 @@ def aggregate_channels(
             ch["campaigns"].append(crec)
             if cid:
                 camp_index[cid] = crec
-            if camp:
-                camp_index[camp.strip().lower()] = crec
+        if camp:
+            camp_index[camp.strip().lower()] = crec
+        if explicit_source:
+            # Если по одному источнику введено несколько расходов, сделки
+            # атрибутируются один раз к первой строке. Все расходы всё равно
+            # суммируются в общем канале этого источника.
+            source_index.setdefault(explicit_source.casefold(), crec)
         crec["spend"] += spend_net
 
     # Атрибуция сделок к кампаниям по utm_campaign (id или название).
     for d in deals:
         key = str(d.get("campaign") or "").strip()
-        if not key:
-            continue
-        crec = camp_index.get(key) or camp_index.get(key.lower())
+        crec = (camp_index.get(key) or camp_index.get(key.lower())) if key else None
+        if crec is None:
+            # UTM-кампания точнее SOURCE_ID, поэтому источник используется
+            # только как резервная сквозная привязка для ручного расхода.
+            source = str(d.get("source") or "").strip().casefold()
+            crec = source_index.get(source)
         if crec is None:
             continue
         amount = int(d.get("amount") or 0)

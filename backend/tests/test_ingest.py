@@ -37,6 +37,31 @@ def test_aggregate_channels_vat_net() -> None:
     assert by_name["Яндекс Директ — РСЯ"]["spend"] == 100000
 
 
+def test_manual_expense_is_attributed_by_bitrix_source() -> None:
+    costs = [{
+        "campaign": "Размещение на площадке",
+        "channel": "Авито — ЮО",
+        "source": "Авито — ЮО",
+        "spend": 10_000,
+    }]
+    deals = [{
+        "external_id": "42",
+        "source": "Авито — ЮО",
+        "campaign": "",
+        "amount": 90_000,
+        "semantic": "S",
+    }]
+
+    channels = ingest.aggregate_channels(costs, deals)
+
+    assert len(channels) == 1
+    assert channels[0]["name"] == "Авито — ЮО"
+    assert channels[0]["spend"] == 10_000
+    assert channels[0]["deals"] == 1
+    assert channels[0]["payments"] == 1
+    assert channels[0]["revenue"] == 90_000
+
+
 def test_baseline_from() -> None:
     channels = [{"revenue": 500000, "margin": 170000, "spend": 100000}]
     # Оплата определяется семантикой стадии Битрикс (S — успех), а не названием.

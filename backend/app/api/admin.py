@@ -186,7 +186,7 @@ async def _validated_expense_values(
     if payload.include_in_romi and not channel:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Для учёта расхода в ROMI укажите рекламный канал",
+            detail="Для учёта расхода в ROMI укажите источник привлечения",
         )
     return {
         "spent_at": datetime.combine(payload.spent_at, time.min, tzinfo=UTC),
