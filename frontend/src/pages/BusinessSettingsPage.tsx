@@ -648,11 +648,12 @@ export default function BusinessSettingsPage() {
                     if (value) mutate((x) => { x.plans[index].period = value.format("YYYY-MM"); });
                   }}
                 />
-                <InputNumber addonBefore="Выручка" min={0} value={row.revenue} onChange={(v) => mutate((x) => { x.plans[index].revenue = v ?? 0; })} />
-                <InputNumber addonBefore="Оплаты" min={0} value={row.payments} onChange={(v) => mutate((x) => { x.plans[index].payments = v ?? 0; })} />
-                <InputNumber addonBefore="Продажи" min={0} value={row.deals} onChange={(v) => mutate((x) => { x.plans[index].deals = v ?? 0; })} />
-                <InputNumber addonBefore="Звонки" min={0} value={row.calls} onChange={(v) => mutate((x) => { x.plans[index].calls = v ?? 0; })} />
-                <InputNumber addonBefore="Встречи" min={0} value={row.meetings} onChange={(v) => mutate((x) => { x.plans[index].meetings = v ?? 0; })} />
+                <InputNumber addonBefore="Выручка, ₽" min={0} value={row.revenue} onChange={(v) => mutate((x) => { x.plans[index].revenue = v ?? 0; })} />
+                <InputNumber addonBefore="Сумма успешных сделок, ₽" min={0} value={row.sales_amount} onChange={(v) => mutate((x) => { x.plans[index].sales_amount = v ?? 0; })} />
+                <InputNumber addonBefore="Поступления из 1С, шт." min={0} value={row.payments} onChange={(v) => mutate((x) => { x.plans[index].payments = v ?? 0; })} />
+                <InputNumber addonBefore="Успешные сделки, шт." min={0} value={row.deals} onChange={(v) => mutate((x) => { x.plans[index].deals = v ?? 0; })} />
+                <InputNumber addonBefore="Звонки, шт." min={0} value={row.calls} onChange={(v) => mutate((x) => { x.plans[index].calls = v ?? 0; })} />
+                <InputNumber addonBefore="Встречи, шт." min={0} value={row.meetings} onChange={(v) => mutate((x) => { x.plans[index].meetings = v ?? 0; })} />
                 <Button danger onClick={() => mutate((x) => x.plans.splice(index, 1))}>Удалить</Button>
               </div>
             ))}
@@ -662,7 +663,7 @@ export default function BusinessSettingsPage() {
                 key: uid("plan"), scope_type: "company", scope_key: entity,
                 legal_entity_key: entity, period: new Date().toISOString().slice(0, 7),
                 funnel: "", lead_source: "",
-                revenue: 0, payments: 0, deals: 0, calls: 0, meetings: 0,
+                revenue: 0, sales_amount: 0, payments: 0, deals: 0, calls: 0, meetings: 0,
               });
             })}>Добавить план</Button>
           </Card>

@@ -181,7 +181,9 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
         if identity in plan_keys:
             raise ValueError("Для выбранного уровня уже задан план на этот месяц")
         plan_keys.add(identity)
-        for metric in ("revenue", "payments", "deals", "calls", "meetings"):
+        for metric in (
+            "revenue", "sales_amount", "payments", "deals", "calls", "meetings"
+        ):
             try:
                 value = int(plan.get(metric) or 0)
             except (TypeError, ValueError) as exc:
@@ -190,7 +192,7 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("Показатели плана не могут быть отрицательными")
             plan[metric] = value
 
-    result["schema_version"] = 2
+    result["schema_version"] = 3
     return result
 
 

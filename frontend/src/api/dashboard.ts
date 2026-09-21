@@ -40,7 +40,8 @@ export interface RevenueSeries { days: string[]; revenue: number[]; margin: numb
 export interface RomiByChannel { name: string; short_name: string; romi: number; }
 export interface ExpenseByArticle { article: string; amount: number; source: "automatic" | "manual"; }
 export interface PlanFactValues {
-  revenue: number | null; payments: number | null; deals: number | null; calls: number | null; meetings: number | null;
+  revenue: number | null; sales_amount: number | null; payments: number | null;
+  deals: number | null; calls: number | null; meetings: number | null;
 }
 export interface PlanFactRow {
   key: string;

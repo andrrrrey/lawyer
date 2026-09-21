@@ -53,6 +53,7 @@ export interface Plan {
   lead_source: string;
   period: string;
   revenue: number;
+  sales_amount: number;
   payments: number;
   deals: number;
   calls: number;

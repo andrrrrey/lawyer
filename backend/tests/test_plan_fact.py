@@ -51,7 +51,8 @@ def test_plan_fact_for_all_scope_levels() -> None:
                 base_plan = {
                     "period": "2026-09", "legal_entity_key": "uo",
                     "funnel": "box:10", "lead_source": "Сайт",
-                    "revenue": 200_000, "payments": 2, "deals": 2,
+                    "revenue": 200_000, "sales_amount": 300_000,
+                    "payments": 2, "deals": 2,
                     "calls": 4, "meetings": 2,
                 }
                 config["plans"] = [
@@ -97,7 +98,8 @@ def test_plan_fact_for_all_scope_levels() -> None:
                     assert row["funnel_name"] == "Основная воронка"
                     assert row["lead_source"] == "Сайт"
                     assert row["fact"] == {
-                        "revenue": 100_000.0, "payments": 1, "deals": 1,
+                        "revenue": 100_000.0, "sales_amount": 150_000.0,
+                        "payments": 1, "deals": 1,
                         "calls": 2, "meetings": 1,
                     }
                     assert row["overall_completion"] == 50.0

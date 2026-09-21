@@ -1,11 +1,12 @@
 import type { PlanFactRow, PlanFactValues } from "@/api/dashboard";
 
 const METRICS: { key: keyof PlanFactValues; label: string; money?: boolean }[] = [
-  { key: "revenue", label: "Выручка", money: true },
-  { key: "payments", label: "Оплаты" },
-  { key: "deals", label: "Продажи" },
-  { key: "calls", label: "Звонки" },
-  { key: "meetings", label: "Встречи" },
+  { key: "revenue", label: "Выручка, ₽", money: true },
+  { key: "sales_amount", label: "Сумма успешных сделок, ₽", money: true },
+  { key: "payments", label: "Поступления из 1С, шт." },
+  { key: "deals", label: "Успешные сделки, шт." },
+  { key: "calls", label: "Звонки, шт." },
+  { key: "meetings", label: "Встречи, шт." },
 ];
 
 const number = (value: number | null, money = false) =>
@@ -27,7 +28,9 @@ function Metric({ row, metric, money }: {
 }
 
 export function PlanFactTable({ rows, financial = true }: { rows: PlanFactRow[]; financial?: boolean }) {
-  const metrics = financial ? METRICS : METRICS.filter((item) => !["revenue", "payments"].includes(item.key));
+  const metrics = financial
+    ? METRICS
+    : METRICS.filter((item) => !["revenue", "sales_amount", "payments"].includes(item.key));
   return (
     <div className="card">
       <div className="card-h">

@@ -15,7 +15,7 @@ from app.models import CrmActivity, Deal, OneCReceipt
 from app.services import business_settings
 
 _MONTH_RE = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
-_METRICS = ("revenue", "payments", "deals", "calls", "meetings")
+_METRICS = ("revenue", "sales_amount", "payments", "deals", "calls", "meetings")
 FilterValue = str | list[str]
 
 
@@ -192,6 +192,7 @@ async def rows(
 
         fact = {
             "revenue": revenue,
+            "sales_amount": float(won_amount),
             "payments": payments,
             "deals": won_deals,
             "calls": int(activity_counts.get("call", 0)),

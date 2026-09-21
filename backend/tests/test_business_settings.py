@@ -61,7 +61,8 @@ def test_plan_funnel_must_belong_to_selected_legal_entity() -> None:
     data["plans"] = [{
         "key": "bad_plan", "scope_type": "company", "scope_key": "csv",
         "legal_entity_key": "csv", "funnel": "box:10", "lead_source": "Сайт",
-        "period": "2026-09", "revenue": 0, "payments": 0, "deals": 0,
+        "period": "2026-09", "revenue": 0, "sales_amount": 0,
+        "payments": 0, "deals": 0,
         "calls": 0, "meetings": 0,
     }]
 
