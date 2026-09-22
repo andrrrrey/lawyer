@@ -198,6 +198,13 @@ def test_sync_stage_history_and_activities_is_idempotent(monkeypatch) -> None:
         ]
         portal.activities = [
             {
+                "external_id": "planned", "deal_external_id": "100", "kind": "call",
+                "subject": "Запланированный звонок", "responsible_id": "12",
+                "occurred_at": "2026-08-01T10:05:00+03:00",
+                "ended_at": None, "duration_sec": 0,
+                "completed": False, "direction": "2", "provider_id": "CRM_CALL",
+            },
+            {
                 "external_id": "a1", "deal_external_id": "100", "kind": "call",
                 "subject": "Исходящий звонок", "responsible_id": "12",
                 "occurred_at": "2026-08-01T10:12:00+03:00",
@@ -218,11 +225,11 @@ def test_sync_stage_history_and_activities_is_idempotent(monkeypatch) -> None:
         second = await ingest.refresh_deals(s, full=True)
 
         assert first["timeline"]["primary"]["history_created"] == 2
-        assert first["timeline"]["primary"]["activities_created"] == 2
+        assert first["timeline"]["primary"]["activities_created"] == 3
         assert second["timeline"]["primary"]["history_created"] == 0
         assert second["timeline"]["primary"]["activities_created"] == 0
         assert len((await s.execute(select(StageHistory))).scalars().all()) == 2
-        assert len((await s.execute(select(CrmActivity))).scalars().all()) == 2
+        assert len((await s.execute(select(CrmActivity))).scalars().all()) == 3
         deal = (await s.execute(select(Deal))).scalar_one()
         assert deal.first_contact == "12 мин"
         assert deal.call is True
@@ -245,6 +252,23 @@ def test_sync_resolves_dictionaries(monkeypatch) -> None:
         assert deal.mgr == "Михаил Иванов"
         assert deal.mgr_id == "12"
         assert deal.src == "Сайт"
+
+    with_db(check)
+
+
+def test_sync_prefers_source_auto_and_falls_back_to_standard_source(monkeypatch) -> None:
+    async def check(s: AsyncSession) -> None:
+        automatic = _raw("100", title="Автоматический источник")
+        automatic["custom"] = {"source_auto": "Яндекс Директ"}
+        fallback = _raw("101", title="Стандартный источник")
+        fallback["custom"] = {"source_auto": "ПУСТО"}
+        monkeypatch.setattr(
+            factory, "get_bitrix24", lambda: FakeBitrix([automatic, fallback])
+        )
+
+        await ingest.refresh_deals(s)
+        rows = list((await s.execute(select(Deal).order_by(Deal.external_id))).scalars())
+        assert [row.src for row in rows] == ["Яндекс Директ", "Сайт"]
 
     with_db(check)
 

@@ -27,6 +27,20 @@ def test_bitrix_normalize_deal() -> None:
     assert d["closed"] == "2026-09-15T12:00:00+05:00"
 
 
+def test_bitrix_normalize_deal_resolves_source_auto_enumeration() -> None:
+    raw = {
+        "ID": 1, "SOURCE_ID": "CALL", "UF_CRM_SOURCE_AUTO": "12580",
+    }
+    deal = bitrix24.normalize_deal(
+        raw,
+        {"source_auto": "UF_CRM_SOURCE_AUTO"},
+        {"UF_CRM_SOURCE_AUTO": {"12580": "Яндекс Директ"}},
+    )
+
+    assert deal["src"] == "CALL"
+    assert deal["custom"]["source_auto"] == "Яндекс Директ"
+
+
 def test_bitrix_normalize_lead_marks_entity_and_lead_funnel() -> None:
     lead = bitrix24.normalize_lead({
         "ID": "77", "TITLE": "Заявка", "STATUS_ID": "IN_PROCESS",

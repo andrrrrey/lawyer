@@ -72,7 +72,9 @@ def test_plan_fact_for_all_scope_levels() -> None:
                     position=1, ref="Сделка #1", external_id="1", crm_source="box",
                     funnel_id="10", legal_entity_key="uo", name="Клиент", src="Сайт",
                     mgr="Иванов", mgr_id="12", status_label="Успех", status_class="st-ok",
-                    amount=150_000, created_at=datetime(2026, 8, 25, tzinfo=UTC),
+                    # Создана задолго до периода, но завершена и оплачена в нём:
+                    # продажи/выручка отдела должны учитывать её по датам фактов.
+                    amount=150_000, created_at=datetime(2026, 1, 25, tzinfo=UTC),
                     closed_at=datetime(2026, 9, 2, tzinfo=UTC),
                 )
                 session.add(deal)

@@ -1191,28 +1191,27 @@ async def departments(
 
     deals = await period_deals(session, period, mgr, source, legal_entity, funnel)
     unassigned_key = "__unassigned__"
-    unassigned_deals = [
-        deal for deal in deals
-        if identity_department.get((deal.crm_source, str(deal.mgr_id or "")))
-        not in aggregates
-    ]
-    if unassigned_deals:
-        aggregates[unassigned_key] = {
-            "key": unassigned_key,
-            "name": "Без отдела / не настроено",
-            "employees": len({
-                (deal.crm_source, str(deal.mgr_id or ""))
-                for deal in unassigned_deals if deal.mgr_id
-            }),
-            "leads": 0, "inwork": 0, "sales": 0, "calls": 0, "meetings": 0,
-            "payments": 0, "revenue": 0.0,
-        }
+    unassigned_identities: set[tuple[str, str]] = set()
 
     def department_item(crm_source: str, user_id: str):
         department_key = identity_department.get((crm_source, user_id))
-        return aggregates.get(department_key or "") or aggregates.get(unassigned_key)
+        configured = aggregates.get(department_key or "")
+        if configured is not None:
+            return configured
+        if unassigned_key not in aggregates:
+            aggregates[unassigned_key] = {
+                "key": unassigned_key,
+                "name": "Без отдела / не настроено",
+                "employees": 0,
+                "leads": 0, "inwork": 0, "sales": 0, "calls": 0, "meetings": 0,
+                "payments": 0, "revenue": 0.0,
+            }
+        if user_id:
+            unassigned_identities.add((crm_source, user_id))
+            aggregates[unassigned_key]["employees"] = len(unassigned_identities)
+        return aggregates[unassigned_key]
 
-    deals_by_id = {deal.id: deal for deal in deals}
+    # Лиды и сделки в работе относятся к периоду создания.
     for deal in deals:
         item = department_item(deal.crm_source, str(deal.mgr_id or ""))
         if item is None:
@@ -1221,43 +1220,61 @@ async def departments(
             item["leads"] += 1
         elif deal.entity_type == "deal":
             item["inwork"] += int(deal.status_class == "st-mid")
-            item["sales"] += int(deal.status_class == "st-ok")
+
+    # Продажи относятся к периоду фактического завершения. Это включает сделки,
+    # созданные в прошлых месяцах и успешно закрытые в выбранном периоде.
+    for deal in await successful_deals(
+        session, period, mgr, source, legal_entity, funnel
+    ):
+        department_item(deal.crm_source, str(deal.mgr_id or ""))["sales"] += 1
 
     now = datetime.now(UTC)
     start, end = _period_start(period, now), _period_end(period, now)
-    if deals_by_id:
-        activity_stmt = (
-            select(CrmActivity, Deal.crm_source)
-            .join(Deal, CrmActivity.deal_id == Deal.id)
-            .where(
-                CrmActivity.deal_id.in_(deals_by_id),
-                CrmActivity.occurred_at.is_not(None),
-                CrmActivity.occurred_at >= start,
-            )
+    configured_funnels = business_settings.configured_funnel_condition(config)
+    activity_stmt = (
+        select(CrmActivity, Deal.crm_source)
+        .join(Deal, CrmActivity.deal_id == Deal.id)
+        .where(
+            Deal.on_dashboard.is_(True),
+            CrmActivity.occurred_at.is_not(None),
+            CrmActivity.occurred_at >= start,
         )
-        if end is not None:
-            activity_stmt = activity_stmt.where(CrmActivity.occurred_at < end)
-        for activity, crm_source in (await session.execute(activity_stmt)).all():
-            item = department_item(crm_source, str(activity.responsible_id or ""))
-            if item is not None and activity.kind in ("call", "meeting"):
-                item[f"{activity.kind}s"] += 1
+    )
+    if end is not None:
+        activity_stmt = activity_stmt.where(CrmActivity.occurred_at < end)
+    activity_stmt = _by_deal_filters(
+        activity_stmt, mgr, source, legal_entity, funnel
+    )
+    if not _has_filter(funnel) and configured_funnels is not None:
+        activity_stmt = activity_stmt.where(configured_funnels)
+    for activity, crm_source in (await session.execute(activity_stmt)).all():
+        item = department_item(crm_source, str(activity.responsible_id or ""))
+        if activity.kind in ("call", "meeting"):
+            item[f"{activity.kind}s"] += 1
 
-        receipt_stmt = select(OneCReceipt).where(
+    # Выручка — подтверждённые и сопоставленные поступления 1С с датой платежа
+    # в периоде. Дата создания связанной сделки на включение выручки не влияет.
+    receipt_stmt = (
+        select(OneCReceipt, Deal)
+        .join(Deal, OneCReceipt.matched_deal_id == Deal.id)
+        .where(
             OneCReceipt.excluded.is_(False),
-            OneCReceipt.matched_deal_id.in_(deals_by_id),
             OneCReceipt.registrar_date.is_not(None),
             OneCReceipt.registrar_date >= start,
+            Deal.on_dashboard.is_(True),
         )
-        if end is not None:
-            receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
-        for receipt in (await session.execute(receipt_stmt)).scalars().all():
-            deal = deals_by_id.get(receipt.matched_deal_id or 0)
-            if deal is None:
-                continue
-            item = department_item(deal.crm_source, str(deal.mgr_id or ""))
-            if item is not None:
-                item["payments"] += 1
-                item["revenue"] += float(receipt.amount or 0)
+    )
+    if end is not None:
+        receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
+    receipt_stmt = _by_deal_filters(
+        receipt_stmt, mgr, source, legal_entity, funnel
+    )
+    if not _has_filter(funnel) and configured_funnels is not None:
+        receipt_stmt = receipt_stmt.where(configured_funnels)
+    for receipt, deal in (await session.execute(receipt_stmt)).all():
+        item = department_item(deal.crm_source, str(deal.mgr_id or ""))
+        item["payments"] += 1
+        item["revenue"] += float(receipt.amount or 0)
 
     for item in aggregates.values():
         item["conversion"] = round(

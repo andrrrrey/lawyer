@@ -169,7 +169,11 @@ def _coerce(value: Any) -> str:
     return str(value)
 
 
-def normalize_deal(raw: dict, extra_fields: dict[str, str] | None = None) -> dict:
+def normalize_deal(
+    raw: dict,
+    extra_fields: dict[str, str] | None = None,
+    extra_value_maps: dict[str, dict[str, str]] | None = None,
+) -> dict:
     """Провайдер-специфичные поля сделки → нормализованная запись для ingest.
 
     extra_fields — карта {семантический_ключ: код поля Битрикс} (сопоставление на
@@ -178,7 +182,8 @@ def normalize_deal(raw: dict, extra_fields: dict[str, str] | None = None) -> dic
     deal_id = raw.get("ID") or raw.get("id")
     custom: dict[str, str] = {}
     for key, code in (extra_fields or {}).items():
-        custom[key] = _coerce(raw.get(code))
+        value = _coerce(raw.get(code))
+        custom[key] = (extra_value_maps or {}).get(code, {}).get(value, value)
     return {
         "external_id": str(deal_id) if deal_id is not None else None,
         "ref": f"Сделка #{deal_id}" if deal_id is not None else "",
@@ -312,6 +317,7 @@ class RealBitrix24Adapter:
     def __init__(self, webhook_url: str | None = None, source_key: str = "primary") -> None:
         self.webhook_url = webhook_url
         self.source_key = source_key
+        self._deal_fields_cache: list[dict] | None = None
 
     def _call(self, method: str, params: dict | None = None) -> list[dict]:
         # Два аргумента сохраняют совместимость тестов, подменяющих модульную функцию.
@@ -342,9 +348,13 @@ class RealBitrix24Adapter:
         modified_after — только изменённые с указанного момента: короткая выборка
         для частой синхронизации, чтобы не тянуть всё окно каждые несколько минут.
         """
+        effective_fields, value_maps = self._deal_extra_fields(extra_fields)
         select = list(_DEAL_SELECT)
         # Добавляем сопоставленные пользовательские поля в выборку.
-        select += [c for c in {v for v in (extra_fields or {}).values() if v} if c not in select]
+        select += [
+            code for code in {value for value in effective_fields.values() if value}
+            if code not in select
+        ]
         params: dict[str, Any] = {"select": select}
         # Ограничение периода резко сокращает объём выгрузки (иначе постранично
         # тянется вся история портала). Даты — в формате ISO 8601.
@@ -355,7 +365,7 @@ class RealBitrix24Adapter:
             params["filter"] = {">=DATE_CREATE": created_after}
             params["order"] = {"DATE_CREATE": "DESC"}
         raw = self._call_list_by_id("crm.deal.list", params)
-        rows = [normalize_deal(d, extra_fields) for d in raw]
+        rows = [normalize_deal(d, effective_fields, value_maps) for d in raw]
         for row in rows:
             row["crm_source"] = self.source_key
         return rows
@@ -369,9 +379,10 @@ class RealBitrix24Adapter:
         повторную выгрузку всей истории портала.
         """
         wanted = list(dict.fromkeys(str(item).strip() for item in deal_ids if str(item).strip()))
+        effective_fields, value_maps = self._deal_extra_fields(extra_fields)
         select = list(_DEAL_SELECT)
         select += [
-            code for code in {value for value in (extra_fields or {}).values() if value}
+            code for code in {value for value in effective_fields.values() if value}
             if code not in select
         ]
         raw: list[dict] = []
@@ -381,7 +392,7 @@ class RealBitrix24Adapter:
                 "select": select,
                 "order": {"ID": "ASC"},
             }))
-        rows = [normalize_deal(item, extra_fields) for item in raw]
+        rows = [normalize_deal(item, effective_fields, value_maps) for item in raw]
         for row in rows:
             row["crm_source"] = self.source_key
         return rows
@@ -418,6 +429,15 @@ class RealBitrix24Adapter:
 
     def fetch_deal_fields(self) -> list[dict]:
         """Список полей сделки: [{"code","title"}] (вкл. пользовательские UF_CRM_*)."""
+        return [
+            {"code": item["code"], "title": item["title"]}
+            for item in self._deal_field_definitions()
+        ]
+
+    def _deal_field_definitions(self) -> list[dict]:
+        """Метаданные полей со значениями списков для внутренней нормализации."""
+        if self._deal_fields_cache is not None:
+            return self._deal_fields_cache
         with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
             resp = request(
                 "POST", f"{self._base()}/crm.deal.fields.json", client=client, json={}
@@ -425,9 +445,55 @@ class RealBitrix24Adapter:
         result = resp.json().get("result", {})
         out: list[dict] = []
         for code, meta in (result.items() if isinstance(result, dict) else []):
-            title = (meta or {}).get("title") or (meta or {}).get("formLabel") or code
-            out.append({"code": code, "title": str(title)})
+            details = meta or {}
+            title = (
+                details.get("formLabel") or details.get("listLabel")
+                or details.get("title") or code
+            )
+            out.append({
+                "code": code,
+                "title": str(title),
+                "items": list(details.get("items") or []),
+            })
+        self._deal_fields_cache = out
         return out
+
+    def _deal_extra_fields(
+        self, extra_fields: dict[str, str] | None,
+    ) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+        """Добавляет «Источник (авто)» и справочники значений списочных полей."""
+        effective = dict(extra_fields or {})
+        value_maps: dict[str, dict[str, str]] = {}
+        try:
+            definitions = self._deal_field_definitions()
+        except Exception as exc:  # noqa: BLE001 — стандартный SOURCE_ID остаётся рабочим
+            logger.warning(
+                "Битрикс24 (%s): метаданные пользовательских полей недоступны: %s",
+                self.source_key, exc,
+            )
+            return effective, value_maps
+        if not effective.get("source_auto"):
+            source_auto = next(
+                (
+                    item for item in definitions
+                    if str(item.get("title") or "").strip().casefold()
+                    == "источник (авто)"
+                ),
+                None,
+            )
+            if source_auto and source_auto.get("code"):
+                effective["source_auto"] = str(source_auto["code"])
+        selected_codes = set(effective.values())
+        for item in definitions:
+            code = str(item.get("code") or "")
+            if code not in selected_codes:
+                continue
+            value_maps[code] = {
+                str(option.get("ID")): str(option.get("VALUE") or option.get("ID"))
+                for option in item.get("items", [])
+                if option.get("ID") is not None
+            }
+        return effective, value_maps
 
     def fetch_stage_history(
         self, deal_ids: list[str] | None = None, changed_after: str | None = None,

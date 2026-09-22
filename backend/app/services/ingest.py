@@ -145,8 +145,13 @@ def _deal_from_bitrix(
     resolved = ((sources or {}).get(src_code) or src_code or "—")[:64]
     # Сырые коды («call», «mail», «cpc»), которые портал не разрешил в название,
     # сворачиваем в понятные названия и объединяем с основными источниками.
-    src = src_svc.canonical_source(resolved)
     custom = nd.get("custom") or {}
+    auto_source = str(custom.get("source_auto") or "").strip()
+    if auto_source.casefold() in {"пусто", "—", "none", "null"} or auto_source.isdigit():
+        auto_source = ""
+    # Для сквозной аналитики пользовательское поле точнее SOURCE_ID. Стандартный
+    # источник остаётся резервным вариантом для старых и незаполненных сделок.
+    src = src_svc.canonical_source(auto_source or resolved)
     return Deal(
         position=position,
         on_dashboard=True,
@@ -727,6 +732,7 @@ async def _sync_crm_timeline(
                 select(CrmActivity).where(
                     CrmActivity.deal_id.in_(deal_db_ids),
                     CrmActivity.kind.in_(["call", "meeting"]),
+                    CrmActivity.completed.is_(True),
                     CrmActivity.occurred_at.is_not(None),
                 )
             )).scalars().all())
@@ -736,7 +742,15 @@ async def _sync_crm_timeline(
             for deal in deals:
                 rows = contacts.get(deal.id, [])
                 times = sorted(
-                    (row.occurred_at for row in rows if row.occurred_at),
+                    (
+                        row.occurred_at for row in rows
+                        if row.occurred_at
+                        and (
+                            deal.created_at is None
+                            or row.occurred_at.replace(tzinfo=None)
+                            >= deal.created_at.replace(tzinfo=None)
+                        )
+                    ),
                     key=lambda value: value.replace(tzinfo=None),
                 )
                 if not times:

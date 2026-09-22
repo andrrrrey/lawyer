@@ -41,7 +41,7 @@ export default function AnalyticsPage() {
                 <b>{reconciliation.data.bitrix.leads.toLocaleString("ru-RU")} лидов</b>
                 <b>{reconciliation.data.bitrix.deals.toLocaleString("ru-RU")} сделок</b>
                 <small>
-                  Успешных из созданных в период: {reconciliation.data.bitrix.successful_deals}, договорная сумма {money(reconciliation.data.bitrix.successful_amount)}
+                  Успешно завершено за период: {reconciliation.data.bitrix.successful_deals}, договорная сумма {money(reconciliation.data.bitrix.successful_amount)}
                 </small>
               </div>
               <div className="recon-box recon-ok">
@@ -77,8 +77,8 @@ export default function AnalyticsPage() {
               columns={[
                 { title: "Воронка Bitrix24", dataIndex: "name" },
                 { title: "Создано сделок", dataIndex: "deals", align: "right" },
-                { title: "Сейчас успешных из созданных", dataIndex: "successful_deals", align: "right" },
-                { title: "Сумма успешных", dataIndex: "successful_amount", align: "right", render: money },
+                { title: "Завершено успешно за период", dataIndex: "successful_deals", align: "right" },
+                { title: "Сумма завершённых успешно", dataIndex: "successful_amount", align: "right", render: money },
               ]}
             />
           </div>
