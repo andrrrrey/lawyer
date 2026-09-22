@@ -62,7 +62,34 @@ def _crm_link(raw: dict, order: dict, counterparty: dict) -> tuple[str, str, str
     Код_BTX/Тип_BTX из контрагента: такая пара навсегда оставляет оплату без сделки.
     Прямые поля и связь контрагента сохранены как совместимость со старым JSON.
     """
-    candidates = (order, raw, counterparty)
+    # Новый явный контракт API: поля сделки не смешиваются со связью
+    # контрагента. Поддерживаем его заранее, даже если интегратор вынесет поля
+    # из вложенного объекта «Заказ» на верхний уровень.
+    explicit_deal_keys = (
+        "СделкаКодBitrix", "dealCodeBitrix", "deal_btx_code",
+    )
+    if any(key in raw for key in explicit_deal_keys):
+        code = str(_first(raw, *explicit_deal_keys)).strip()
+        entity_type = _crm_type(_first(
+            raw, "СделкаТипBitrix", "dealTypeBitrix", "deal_btx_type",
+        ))
+        if not code:
+            return "", "", ""
+        source_match = _CRM_SOURCE_CODE.fullmatch(code)
+        if source_match:
+            return source_match.group(2), entity_type or "deal", source_match.group(1).lower()
+        return code, entity_type or "deal", ""
+
+    # В актуальном JSON сам факт наличия секции «Заказ» означает, что только она
+    # является источником связи с CRM-сделкой. Если Код_BTX заказа пуст, платёж
+    # должен остаться несопоставленным. Нельзя подставлять Контрагент.Код_BTX:
+    # это ID компании/контакта (например cnt151011), а не сделки.
+    if any(key in raw for key in ("Заказ", "order")):
+        candidates = (order,)
+    else:
+        # Совместимость со старым плоским форматом. Вложенный контрагент допустим
+        # только когда он явно был размечен как сделка в прежнем контракте API.
+        candidates = (raw, counterparty)
     for source in candidates:
         code = str(_first(source, "Код_BTX", "code_btx", "crmExternalId")).strip()
         if not code:
@@ -70,6 +97,8 @@ def _crm_link(raw: dict, order: dict, counterparty: dict) -> tuple[str, str, str
         entity_type = _crm_type(
             _first(source, "Тип_BTX", "type_btx", "crmEntityType")
         )
+        if source is counterparty and entity_type != "deal":
+            continue
         source_match = _CRM_SOURCE_CODE.fullmatch(code)
         if source_match:
             return source_match.group(2), entity_type, source_match.group(1).lower()

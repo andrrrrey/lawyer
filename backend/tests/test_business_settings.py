@@ -196,6 +196,34 @@ def test_onec_order_deal_has_priority_over_counterparty_company() -> None:
     assert row["crm_entity_type"] == "deal"
 
 
+def test_onec_empty_order_does_not_fall_back_to_counterparty_company() -> None:
+    """Пустая связь заказа остаётся несопоставленной, cnt — не ID сделки."""
+    row = normalize_receipt({
+        "Контрагент": {"Код_BTX": "cnt151011", "Тип_BTX": "company"},
+        "Заказ": {
+            "ИД": "order-1", "Номер": "НФУА-000873",
+            "Код_BTX": "", "Тип_BTX": "",
+        },
+        "Сумма": 60000,
+    })
+
+    assert row["crm_external_id"] == ""
+    assert row["crm_entity_type"] == ""
+
+
+def test_onec_explicit_deal_fields_are_supported() -> None:
+    row = normalize_receipt({
+        "СделкаКодBitrix": "CLOUD_38178",
+        "СделкаТипBitrix": "Сделка",
+        "Контрагент": {"Код_BTX": "cnt151011", "Тип_BTX": "company"},
+        "Сумма": 1000,
+    })
+
+    assert row["crm_external_id"] == "38178"
+    assert row["crm_entity_type"] == "deal"
+    assert row["crm_source"] == "cloud"
+
+
 def test_onec_prefixed_btx_code_identifies_portal_and_deal_id() -> None:
     row = normalize_receipt({
         "Заказ": {"Код_BTX": "CLOUD_38178", "Тип_BTX": "deal"},
