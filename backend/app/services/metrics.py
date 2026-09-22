@@ -894,10 +894,9 @@ async def attention(
     review = res["review"]
     cap = await vio.risk_amount_cap(session)
     money_at_risk = vio.money_at_risk(regular, cap)
-    risk_stmt = select(Deal).where(
-        Deal.risk.is_not(None), Deal.on_dashboard.is_(True),
-        Deal.status_class == "st-mid",
-    )
+    risk_stmt = select(Deal).where(Deal.risk.is_not(None), Deal.on_dashboard.is_(True))
+    if settings.data_source == "real":
+        risk_stmt = risk_stmt.where(Deal.status_class == "st-mid")
     risk_leads = (await session.execute(
         _by_deal_filters(risk_stmt, mgr, source, legal_entity, funnel)
     )).scalars().all()
