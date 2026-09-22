@@ -43,11 +43,18 @@ def test_plan_fact_for_all_scope_levels() -> None:
                     "bitrix_user_id": "12", "legal_entity_key": "uo",
                     "department_key": "sales", "enabled": True,
                 }]
-                config["funnels"] = [{
-                    "key": "box_10", "external_id": "10", "name": "Основная воронка",
-                    "crm_source": "box", "legal_entity_key": "uo",
-                    "sla_profile_key": "default", "entity_type": "deal", "enabled": True,
-                }]
+                config["funnels"] = [
+                    {
+                        "key": "box_10", "external_id": "10", "name": "Основная воронка",
+                        "crm_source": "box", "legal_entity_key": "uo",
+                        "sla_profile_key": "default", "entity_type": "deal", "enabled": True,
+                    },
+                    {
+                        "key": "box_lead", "external_id": "lead", "name": "Лиды",
+                        "crm_source": "box", "legal_entity_key": "uo",
+                        "sla_profile_key": "default", "entity_type": "lead", "enabled": True,
+                    },
+                ]
                 base_plan = {
                     "period": "2026-09", "legal_entity_key": "uo",
                     "funnel": "box:10", "lead_source": "Сайт",
@@ -69,6 +76,20 @@ def test_plan_fact_for_all_scope_levels() -> None:
                 )
                 session.add(deal)
                 await session.flush()
+                session.add(Deal(
+                    position=2, ref="Лид #2", external_id="2", crm_source="box",
+                    entity_type="lead", funnel_id="lead", legal_entity_key="uo",
+                    name="Обращение", src="Сайт", mgr="Иванов", mgr_id="12",
+                    status_label="В работе", status_class="st-mid", amount=0,
+                    created_at=datetime(2026, 9, 2, tzinfo=UTC),
+                ))
+                session.add(Deal(
+                    position=3, ref="Лид #3", external_id="3", crm_source="box",
+                    entity_type="lead", funnel_id="lead", legal_entity_key="uo",
+                    name="Непривязанное обращение", src="Сайт", mgr="Новый сотрудник",
+                    mgr_id="99", status_label="В работе", status_class="st-mid", amount=0,
+                    created_at=datetime(2026, 9, 2, tzinfo=UTC),
+                ))
                 session.add_all([
                     CrmActivity(
                         deal_id=deal.id, external_id="c1", kind="call",
@@ -105,12 +126,20 @@ def test_plan_fact_for_all_scope_levels() -> None:
                     assert row["overall_completion"] == 50.0
 
                 departments = await metrics.departments(session, "30")
-                assert departments == [{
-                    "key": "sales", "name": "Продажи", "employees": 1,
-                    "leads": 1, "inwork": 0, "sales": 1, "calls": 2,
-                    "meetings": 1, "payments": 1, "revenue": 100_000.0,
-                    "conversion": 100.0, "revenue_display": "100 000 ₽",
-                }]
+                assert departments == [
+                    {
+                        "key": "sales", "name": "Продажи", "employees": 1,
+                        "leads": 1, "inwork": 0, "sales": 1, "calls": 2,
+                        "meetings": 1, "payments": 1, "revenue": 100_000.0,
+                        "conversion": 100.0, "revenue_display": "100 000 ₽",
+                    },
+                    {
+                        "key": "__unassigned__", "name": "Без отдела / не настроено",
+                        "employees": 1, "leads": 1, "inwork": 0, "sales": 0,
+                        "calls": 0, "meetings": 0, "payments": 0, "revenue": 0.0,
+                        "conversion": 0.0, "revenue_display": "0 ₽",
+                    },
+                ]
         finally:
             settings.onec_endpoint = previous_endpoint
             await engine.dispose()

@@ -1150,15 +1150,38 @@ async def departments(
         return []
 
     deals = await period_deals(session, period, mgr, source, legal_entity, funnel)
+    unassigned_key = "__unassigned__"
+    unassigned_deals = [
+        deal for deal in deals
+        if identity_department.get((deal.crm_source, str(deal.mgr_id or "")))
+        not in aggregates
+    ]
+    if unassigned_deals:
+        aggregates[unassigned_key] = {
+            "key": unassigned_key,
+            "name": "Без отдела / не настроено",
+            "employees": len({
+                (deal.crm_source, str(deal.mgr_id or ""))
+                for deal in unassigned_deals if deal.mgr_id
+            }),
+            "leads": 0, "inwork": 0, "sales": 0, "calls": 0, "meetings": 0,
+            "payments": 0, "revenue": 0.0,
+        }
+
+    def department_item(crm_source: str, user_id: str):
+        department_key = identity_department.get((crm_source, user_id))
+        return aggregates.get(department_key or "") or aggregates.get(unassigned_key)
+
     deals_by_id = {deal.id: deal for deal in deals}
     for deal in deals:
-        department_key = identity_department.get((deal.crm_source, str(deal.mgr_id or "")))
-        item = aggregates.get(department_key or "")
+        item = department_item(deal.crm_source, str(deal.mgr_id or ""))
         if item is None:
             continue
-        item["leads"] += 1
-        item["inwork"] += int(deal.status_class == "st-mid")
-        item["sales"] += int(deal.status_class == "st-ok")
+        if deal.entity_type == "lead":
+            item["leads"] += 1
+        elif deal.entity_type == "deal":
+            item["inwork"] += int(deal.status_class == "st-mid")
+            item["sales"] += int(deal.status_class == "st-ok")
 
     now = datetime.now(UTC)
     start, end = _period_start(period, now), _period_end(period, now)
@@ -1175,10 +1198,7 @@ async def departments(
         if end is not None:
             activity_stmt = activity_stmt.where(CrmActivity.occurred_at < end)
         for activity, crm_source in (await session.execute(activity_stmt)).all():
-            department_key = identity_department.get(
-                (crm_source, str(activity.responsible_id or ""))
-            )
-            item = aggregates.get(department_key or "")
+            item = department_item(crm_source, str(activity.responsible_id or ""))
             if item is not None and activity.kind in ("call", "meeting"):
                 item[f"{activity.kind}s"] += 1
 
@@ -1194,8 +1214,7 @@ async def departments(
             deal = deals_by_id.get(receipt.matched_deal_id or 0)
             if deal is None:
                 continue
-            department_key = identity_department.get((deal.crm_source, str(deal.mgr_id or "")))
-            item = aggregates.get(department_key or "")
+            item = department_item(deal.crm_source, str(deal.mgr_id or ""))
             if item is not None:
                 item["payments"] += 1
                 item["revenue"] += float(receipt.amount or 0)
