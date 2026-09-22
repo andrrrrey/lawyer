@@ -135,6 +135,7 @@ def test_monitor_review(client: TestClient) -> None:
 def test_analytics_chain(client: TestClient) -> None:
     data = client.get("/api/analytics/chain", params={"period": "30"}).json()
     assert len(data) == 6
+    assert data[4]["label"] == "Договоры заключены"
     assert data[0]["conversion"] is None
     assert data[1]["conversion"] is not None
     assert data[-1]["conversion"] is None

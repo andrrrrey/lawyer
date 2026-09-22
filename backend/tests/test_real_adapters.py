@@ -16,13 +16,15 @@ def test_direct_parse_tsv() -> None:
 
 def test_bitrix_normalize_deal() -> None:
     raw = {"ID": 3390, "TITLE": "ООО «ТеплоДом»", "STAGE_ID": "C1:PREPARATION",
-           "OPPORTUNITY": "145000", "ASSIGNED_BY_ID": "12", "SOURCE_ID": "CALL"}
+           "OPPORTUNITY": "145000", "ASSIGNED_BY_ID": "12", "SOURCE_ID": "CALL",
+           "CLOSEDATE": "2026-09-15T12:00:00+05:00"}
     d = bitrix24.normalize_deal(raw)
     assert d["external_id"] == "3390"
     assert d["ref"] == "Сделка #3390"
     assert d["name"] == "ООО «ТеплоДом»"
     assert d["amount"] == 145000
     assert d["stage"] == "C1:PREPARATION"
+    assert d["closed"] == "2026-09-15T12:00:00+05:00"
 
 
 def test_bitrix_normalize_lead_marks_entity_and_lead_funnel() -> None:

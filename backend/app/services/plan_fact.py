@@ -116,29 +116,34 @@ async def rows(
             scoped_employees = []
             scope_name = entities.get(entity_key, "Компания")
 
-        deal_conditions = [
+        deal_scope = [
             Deal.legal_entity_key == entity_key,
-            Deal.created_at.is_not(None),
-            Deal.created_at >= start,
-            Deal.created_at <= end,
         ]
         funnel_condition = _funnel_condition(plan_funnel or funnel)
         if funnel_condition is not None:
-            deal_conditions.append(funnel_condition)
+            deal_scope.append(funnel_condition)
         if plan_source:
-            deal_conditions.append(Deal.src == plan_source)
+            deal_scope.append(Deal.src == plan_source)
         if scope_type != "company":
-            deal_conditions.append(_employee_condition(scoped_employees))
+            deal_scope.append(_employee_condition(scoped_employees))
+
+        # Успешные сделки относятся к периоду по дате завершения Bitrix24, как в
+        # стандартном фильтре «Дата завершения». Для старых строк до первой полной
+        # синхронизации оставляем безопасный fallback на дату создания.
+        close_date = func.coalesce(Deal.closed_at, Deal.created_at)
+        won_conditions = [
+            *deal_scope,
+            close_date.is_not(None),
+            close_date >= start,
+            close_date <= end,
+            Deal.status_class == "st-ok",
+        ]
 
         won_deals = int(await session.scalar(
-            select(func.count()).select_from(Deal).where(
-                *deal_conditions, Deal.status_class == "st-ok"
-            )
+            select(func.count()).select_from(Deal).where(*won_conditions)
         ) or 0)
         won_amount = int(await session.scalar(
-            select(func.coalesce(func.sum(Deal.amount), 0)).where(
-                *deal_conditions, Deal.status_class == "st-ok"
-            )
+            select(func.coalesce(func.sum(Deal.amount), 0)).where(*won_conditions)
         ) or 0)
 
         activity_conditions = [

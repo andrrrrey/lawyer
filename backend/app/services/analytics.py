@@ -73,7 +73,7 @@ async def reconciliation(
 ) -> dict:
     """Прозрачная сверка созданных сущностей Bitrix и денежных фактов 1С.
 
-    Сумма Bitrix — договорная сумма успешных сделок, *созданных* в периоде.
+    Сумма Bitrix — договорная сумма сделок, *завершённых успешно* в периоде.
     Выручка 1С — поступления с датой регистратора в периоде. Это разные когорты,
     поэтому разницу показываем явно, а не маскируем некорректной конверсией.
     """
@@ -87,7 +87,9 @@ async def reconciliation(
     )
     leads = [row for row in rows if row.entity_type == "lead"]
     deals = [row for row in rows if row.entity_type == "deal"]
-    successful = [row for row in deals if row.status_class == "st-ok"]
+    successful = await metrics.successful_deals(
+        session, period, legal_entity=legal_entity
+    )
 
     start = per.start(period, datetime.now(UTC))
     end = per.end(period, datetime.now(UTC))
@@ -122,9 +124,18 @@ async def reconciliation(
             "successful_amount": 0,
         })
         item["deals"] += 1
-        if deal.status_class == "st-ok":
-            item["successful_deals"] += 1
-            item["successful_amount"] += int(deal.amount or 0)
+    for deal in successful:
+        identity = (deal.crm_source, deal.funnel_id)
+        item = funnel_totals.setdefault(identity, {
+            "crm_source": deal.crm_source,
+            "funnel_id": deal.funnel_id,
+            "name": funnel_names.get(identity) or deal.funnel_name or deal.funnel_id,
+            "deals": 0,
+            "successful_deals": 0,
+            "successful_amount": 0,
+        })
+        item["successful_deals"] += 1
+        item["successful_amount"] += int(deal.amount or 0)
 
     successful_amount = sum(int(row.amount or 0) for row in successful)
     revenue = sum((row.amount for row in included), start=0)

@@ -173,6 +173,7 @@ def _deal_from_bitrix(
         amount=int(nd.get("amount") or 0),
         first_contact="—",
         created_at=_parse_dt(nd.get("created")),
+        closed_at=_parse_dt(nd.get("closed")),
         # Без истории новая сделка находится на первой стадии с момента создания;
         # фактическая история ниже заменит это значение точным переходом.
         stage_entered_at=_parse_dt(nd.get("created")),
@@ -521,7 +522,8 @@ _DEAL_SYNC_FIELDS = (
     "on_dashboard", "ref", "crm_source", "entity_type", "legal_entity_key",
     "funnel_id", "funnel_name", "name", "src", "campaign", "utm", "mgr", "mgr_id",
     "phone", "client_type", "refuse_reason", "custom", "status_label", "status_class",
-    "stage", "invoice", "amount", "created_at", "last_activity_at", "has_open_action",
+    "stage", "invoice", "amount", "created_at", "closed_at", "last_activity_at",
+    "has_open_action",
 )
 
 

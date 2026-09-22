@@ -232,6 +232,39 @@ async def period_deals(
     )).scalars().all())
 
 
+async def successful_deals(
+    session: AsyncSession,
+    period: str,
+    mgr: FilterValue = "all",
+    source: str = "all",
+    legal_entity: FilterValue = "all",
+    funnel: FilterValue = "all",
+) -> list[Deal]:
+    """Успешные сделки за период по фактической дате завершения Bitrix24."""
+    now = datetime.now(UTC)
+    closed = func.coalesce(Deal.closed_at, Deal.created_at)
+    stmt = select(Deal).where(
+        Deal.on_dashboard.is_(True),
+        Deal.entity_type == "deal",
+        Deal.status_class == "st-ok",
+        closed.is_not(None),
+        closed >= _period_start(period, now),
+    )
+    end = _period_end(period, now)
+    if end is not None:
+        stmt = stmt.where(closed < end)
+    if not _has_filter(funnel):
+        from app.services import business_settings
+
+        config = await business_settings.get_settings(session)
+        configured = business_settings.configured_funnel_condition(config)
+        if configured is not None:
+            stmt = stmt.where(configured)
+    return list((await session.execute(
+        _by_deal_filters(stmt, mgr, source, legal_entity, funnel)
+    )).scalars().all())
+
+
 async def _period_baseline(
     session: AsyncSession,
     period: str,
@@ -278,6 +311,57 @@ async def _period_baseline(
 
     lead_rows = [deal for deal in rows if deal.entity_type == "lead"]
     deal_rows = [deal for deal in rows if deal.entity_type == "deal"]
+    # Заключённые договоры: сделка дошла до настроенной стадии ожидания оплаты
+    # («Договор (ждём деньги)» и аналоги) либо уже успешно завершена.
+    from app.services import business_settings
+
+    business_config = await business_settings.get_settings(session)
+    contract_stages = {
+        (str(item.get("crm_source")), str(item.get("external_id"))): {
+            str(stage).strip().casefold()
+            for stage in item.get("expected_payment_stages", [])
+            if str(stage).strip()
+        }
+        for item in business_config.get("funnels", []) if item.get("enabled", True)
+    }
+    deal_ids = [deal.id for deal in deal_rows]
+    deal_scope_by_id = {
+        deal.id: (deal.crm_source, deal.funnel_id) for deal in deal_rows
+    }
+    contract_start = _period_start(period, datetime.now(UTC))
+    contract_end = _period_end(period, datetime.now(UTC))
+    history_stmt = select(StageHistory).where(
+        StageHistory.deal_id.in_(deal_ids),
+        StageHistory.changed_at.is_not(None),
+        StageHistory.changed_at >= contract_start,
+    )
+    if contract_end is not None:
+        history_stmt = history_stmt.where(StageHistory.changed_at < contract_end)
+    history = list((await session.execute(
+        history_stmt
+    )).scalars().all()) if deal_ids else []
+    reached_contract = {
+        item.deal_id for item in history
+        if str(item.to_stage or "").strip().casefold()
+        in contract_stages.get(deal_scope_by_id.get(item.deal_id, ("", "")), set())
+    }
+    contracts = 0
+    for deal in deal_rows:
+        closed = deal.closed_at or deal.created_at
+        successful_in_period = bool(
+            deal.status_class == "st-ok"
+            and closed is not None
+            and closed >= contract_start
+            and (contract_end is None or closed < contract_end)
+        )
+        currently_at_contract = bool(
+            contract_end is None
+            and str(deal.stage or "").strip().casefold()
+            in contract_stages.get((deal.crm_source, deal.funnel_id), set())
+        )
+        contracts += int(
+            successful_in_period or deal.id in reached_contract or currently_at_contract
+        )
     # SLA-карточки раньше в боевом режиме были заглушками (всегда 0). Средний
     # первый контакт считаем по фактической первой активности Bitrix24 у лидов,
     # созданных в выбранном периоде. Если портал работает только со сделками,
@@ -322,6 +406,7 @@ async def _period_baseline(
         "leads": float(len(lead_rows)),
         "qual": float(sum(1 for d in rows if d.stage not in (None, "Новое обращение"))),
         "deals": float(len(deal_rows)),
+        "contracts": float(contracts),
         "invoices": float(sum(1 for d in rows if d.invoice)),
         "payments": float(payments),
         "revenue": float(revenue),
@@ -400,7 +485,11 @@ async def _business_kpi_cards(
         if str(deal.stage or "").strip().casefold() in stages:
             expected.append(deal)
 
-    won = [deal for deal in rows if deal.status_class == "st-ok" and deal.amount]
+    won = [
+        deal for deal in await successful_deals(
+            session, period, mgr, source, legal_entity, funnel
+        ) if deal.amount
+    ]
     average_contract, contract_sample_size = _trimmed_mean([
         int(deal.amount or 0) for deal in won
     ])

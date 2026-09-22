@@ -81,6 +81,10 @@ class Deal(Base):
     custom: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Фактическая дата завершения сделки из CLOSEDATE Bitrix24. Для активных
+    # сделок поле может содержать плановую дату, поэтому используется только
+    # совместно с семантикой успешной/проваленной стадии.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     first_contact_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

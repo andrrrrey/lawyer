@@ -42,7 +42,7 @@ export const NAV_ITEMS: NavItem[] = [
     key: "analytics",
     path: "/analytics",
     label: "Сквозная аналитика",
-    subtitle: "Реклама → визит → звонок → сделка → оплата → выручка",
+    subtitle: "Реклама → визит → звонок → сделка → договор → выручка",
     section: "Маркетинг",
     Icon: AnalyticsIcon,
   },

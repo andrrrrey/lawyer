@@ -25,7 +25,7 @@ _PAGE_PAUSE_SECONDS = 0.6
 
 _DEAL_SELECT = [
     "ID", "TITLE", "CATEGORY_ID", "STAGE_ID", "STAGE_SEMANTIC_ID", "ASSIGNED_BY_ID",
-    "CONTACT_ID", "SOURCE_ID", "OPPORTUNITY", "DATE_CREATE", "DATE_MODIFY",
+    "CONTACT_ID", "SOURCE_ID", "OPPORTUNITY", "DATE_CREATE", "DATE_MODIFY", "CLOSEDATE",
     "LAST_ACTIVITY_TIME", "UTM_SOURCE", "UTM_CAMPAIGN",
 ]
 
@@ -194,6 +194,7 @@ def normalize_deal(raw: dict, extra_fields: dict[str, str] | None = None) -> dic
         "campaign": raw.get("UTM_CAMPAIGN"),
         "amount": int(float(raw.get("OPPORTUNITY") or 0)),
         "created": raw.get("DATE_CREATE"),
+        "closed": raw.get("CLOSEDATE"),
         "last_activity": raw.get("LAST_ACTIVITY_TIME") or raw.get("DATE_MODIFY"),
         "custom": custom,
     }
