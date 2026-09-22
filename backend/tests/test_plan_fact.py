@@ -87,7 +87,8 @@ def test_plan_fact_for_all_scope_levels() -> None:
                 # Создана в сентябре, но закрыта в октябре: в сентябрьский факт
                 # успешных сделок попадать не должна.
                 session.add(Deal(
-                    position=4, ref="Сделка #4", external_id="4", crm_source="box",
+                    position=4, on_dashboard=False, ref="Сделка #4", external_id="4",
+                    crm_source="box",
                     funnel_id="10", legal_entity_key="uo", name="Позднее закрытие",
                     src="Сайт", mgr="Иванов", mgr_id="12", status_label="Успех",
                     status_class="st-ok", amount=900_000,

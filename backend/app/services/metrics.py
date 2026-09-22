@@ -56,6 +56,11 @@ def _period_end(period: str | None, now: datetime) -> datetime | None:
     return per.end(period, now)
 
 
+def _aware_utc(value: datetime) -> datetime:
+    """SQLite в тестах теряет tzinfo; PostgreSQL возвращает aware datetime."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def _by_deal_filters(
     stmt, mgr: FilterValue = "all", source: str = "all", legal_entity: FilterValue = "all",
     funnel: FilterValue = "all",
@@ -347,7 +352,8 @@ async def _period_baseline(
     }
     contracts = 0
     for deal in deal_rows:
-        closed = deal.closed_at or deal.created_at
+        raw_closed = deal.closed_at or deal.created_at
+        closed = _aware_utc(raw_closed) if raw_closed is not None else None
         successful_in_period = bool(
             deal.status_class == "st-ok"
             and closed is not None
