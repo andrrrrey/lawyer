@@ -59,7 +59,7 @@ KPI_CARDS = [
         "trend": "up", "delta": "+18 п.п.", "spark": [6, 7, 8, 9, 10, 12, 13, 15], "drill": "analytics",
     },
     {
-        "key": "first_contact", "label": "Ср. первый контакт", "icon": "i-cyan",
+        "key": "first_contact", "label": "Медиана первого контакта", "icon": "i-cyan",
         "svg": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/>',
         "kind": "minutes", "base_key": "first_contact", "scales": False,
         "trend": "up", "delta": "−1,3 мин", "spark": [12, 11, 11, 10, 9, 9, 8, 8], "drill": None,

@@ -207,6 +207,20 @@ def test_real_sla_kpis_are_calculated_instead_of_zero_placeholders() -> None:
         contacted.status_label = contacted.stage
         contacted.first_contact_at = contacted.created_at + timedelta(minutes=12)
 
+        quick = _deal(
+            22, days_ago=1, mgr="Иванов", src="Сайт", amount=0, won=False
+        )
+        quick.entity_type = "lead"
+        quick.funnel_id = "lead"
+        quick.first_contact_at = quick.created_at + timedelta(minutes=5)
+
+        outlier = _deal(
+            23, days_ago=2, mgr="Иванов", src="Сайт", amount=0, won=False
+        )
+        outlier.entity_type = "lead"
+        outlier.funnel_id = "lead"
+        outlier.first_contact_at = outlier.created_at + timedelta(minutes=1_000)
+
         overdue = _deal(
             21, days_ago=1, mgr="Иванов", src="Сайт", amount=0, won=False
         )
@@ -215,7 +229,7 @@ def test_real_sla_kpis_are_calculated_instead_of_zero_placeholders() -> None:
         overdue.stage = "Новое обращение"
         overdue.status_label = overdue.stage
         overdue.first_contact_at = None
-        s.add_all([contacted, overdue])
+        s.add_all([contacted, quick, outlier, overdue])
         await s.commit()
 
         values = await metrics._period_baseline(s, "7")
@@ -266,12 +280,9 @@ def test_expected_averages_and_deal_cycle_are_real() -> None:
     with_real_data(check)
 
 
-def test_average_contract_trims_lower_and_upper_twenty_percent() -> None:
+def test_average_contract_uses_median_without_discarding_sales() -> None:
     values = [10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 1_000_000]
-    average, sample_size = metrics._trimmed_mean(values)
-
-    assert average == 55_000
-    assert sample_size == 6
+    assert metrics._median_value(values) == 55_000
 
 
 def test_sources_donut_follows_filters() -> None:

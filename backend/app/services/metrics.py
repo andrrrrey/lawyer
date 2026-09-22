@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from statistics import median
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -370,9 +371,9 @@ async def _period_baseline(
         "spend": ad["spend"],
         "clicks": ad["clicks"],
         "visits": ad["visits"],
-        "first_contact": (
-            sum(contact_minutes) / len(contact_minutes) if contact_minutes else 0.0
-        ),
+        # Медиана не позволяет единичному пропущенному на несколько дней лиду
+        # исказить показатель всего отдела.
+        "first_contact": _median_value(contact_minutes),
         "overdue": float(overdue),
     }
 
@@ -404,12 +405,9 @@ def _minutes(value: float) -> str:
     return f"{text} мин"
 
 
-def _trimmed_mean(values: list[int], fraction: float = 0.2) -> tuple[float, int]:
-    """Среднее без нижних и верхних 20%; на малой выборке — обычное среднее."""
-    ordered = sorted(values)
-    trim = int(len(ordered) * fraction) if len(ordered) >= 5 else 0
-    sample = ordered[trim:len(ordered) - trim] if trim else ordered
-    return (sum(sample) / len(sample), len(sample)) if sample else (0.0, 0)
+def _median_value(values: list[int | float]) -> float:
+    """Медиана ряда или 0 для пустой выборки."""
+    return float(median(values)) if values else 0.0
 
 
 async def _business_kpi_cards(
@@ -446,9 +444,8 @@ async def _business_kpi_cards(
             session, period, mgr, source, legal_entity, funnel
         ) if deal.amount
     ]
-    average_contract, contract_sample_size = _trimmed_mean([
-        int(deal.amount or 0) for deal in won
-    ])
+    contract_amounts = [int(deal.amount or 0) for deal in won]
+    median_contract = _median_value(contract_amounts)
 
     now = datetime.now(UTC)
     receipt_stmt = select(OneCReceipt).where(
@@ -509,14 +506,11 @@ async def _business_kpi_cards(
             "delta": f"{len(expected)} сделок",
         },
         {
-            **common, "key": "average_contract", "label": "Средняя сумма договора",
+            **common, "key": "average_contract", "label": "Медианная сумма договора",
             "icon": "i-cyan", "svg": '<path d="M5 4h14v16H5zM8 9h8M8 13h8"/>',
-            "kind": "money", "value": average_contract,
-            "display": f.money_short(average_contract) if average_contract else "—",
-            "delta": (
-                f"{contract_sample_size} из {len(won)} продаж"
-                if contract_sample_size != len(won) else f"{len(won)} продаж"
-            ),
+            "kind": "money", "value": median_contract,
+            "display": f.money_short(median_contract) if median_contract else "—",
+            "delta": f"медиана по {len(won)} продажам",
         },
         {
             **common, "key": "average_receipt", "label": "Средняя сумма поступления",
@@ -584,8 +578,9 @@ async def kpis(
                 display = _minutes(raw)
             else:
                 display = f.fmt(raw)
+        label = "Медиана первого контакта" if real and c.key == "first_contact" else c.label
         out.append({
-            "key": c.key, "label": c.label, "icon": c.icon, "svg": c.svg, "kind": c.kind,
+            "key": c.key, "label": label, "icon": c.icon, "svg": c.svg, "kind": c.kind,
             "value": value, "display": display,
             "trend": "flat" if real else c.trend,
             "delta": "" if real else c.delta,
