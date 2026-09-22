@@ -278,6 +278,46 @@ async def _period_baseline(
 
     lead_rows = [deal for deal in rows if deal.entity_type == "lead"]
     deal_rows = [deal for deal in rows if deal.entity_type == "deal"]
+    # SLA-карточки раньше в боевом режиме были заглушками (всегда 0). Средний
+    # первый контакт считаем по фактической первой активности Bitrix24 у лидов,
+    # созданных в выбранном периоде. Если портал работает только со сделками,
+    # используем их как резервный набор.
+    contact_rows = [
+        deal for deal in lead_rows
+        if deal.created_at and deal.first_contact_at
+        and deal.first_contact_at >= deal.created_at
+    ]
+    if not contact_rows:
+        contact_rows = [
+            deal for deal in deal_rows
+            if deal.created_at and deal.first_contact_at
+            and deal.first_contact_at >= deal.created_at
+        ]
+    contact_minutes = [
+        (deal.first_contact_at - deal.created_at).total_seconds() / 60
+        for deal in contact_rows
+    ]
+
+    # «Просрочки регламента» — текущие критичные нарушения, событие которых
+    # относится к выбранному периоду и текущему набору фильтров.
+    from app.services import violations as vio
+
+    evaluated = await vio.evaluate_current(
+        session, mgr=mgr, source=source,
+        legal_entity=legal_entity, funnel=funnel,
+    )
+    start = _period_start(period, datetime.now(UTC))
+    overdue_end = _period_end(period, datetime.now(UTC))
+    overdue = 0
+    for item in evaluated["regular"]:
+        happened = item.get("violation_at")
+        if item.get("severity") != "over" or happened is None:
+            continue
+        if happened.tzinfo is None:
+            happened = happened.replace(tzinfo=UTC)
+        if happened >= start and (overdue_end is None or happened < overdue_end):
+            overdue += 1
+
     return {
         "leads": float(len(lead_rows)),
         "qual": float(sum(1 for d in rows if d.stage not in (None, "Новое обращение"))),
@@ -289,8 +329,10 @@ async def _period_baseline(
         "spend": ad["spend"],
         "clicks": ad["clicks"],
         "visits": ad["visits"],
-        "first_contact": 0.0,
-        "overdue": 0.0,
+        "first_contact": (
+            sum(contact_minutes) / len(contact_minutes) if contact_minutes else 0.0
+        ),
+        "overdue": float(overdue),
     }
 
 
@@ -852,7 +894,10 @@ async def attention(
     review = res["review"]
     cap = await vio.risk_amount_cap(session)
     money_at_risk = vio.money_at_risk(regular, cap)
-    risk_stmt = select(Deal).where(Deal.risk.is_not(None), Deal.on_dashboard.is_(True))
+    risk_stmt = select(Deal).where(
+        Deal.risk.is_not(None), Deal.on_dashboard.is_(True),
+        Deal.status_class == "st-mid",
+    )
     risk_leads = (await session.execute(
         _by_deal_filters(risk_stmt, mgr, source, legal_entity, funnel)
     )).scalars().all()

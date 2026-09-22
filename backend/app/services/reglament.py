@@ -32,7 +32,12 @@ _TERMINAL_KEYS = ("отказ", "спам", "успешно", "реализ", "�
 _NEW_KEYS = ("новое обращение", "новый заказ")
 
 
-def is_terminal_stage(stage: str | None) -> bool:
+def is_terminal_stage(stage: str | None, status_class: str | None = None) -> bool:
+    # Семантика Bitrix24 надёжнее произвольного названия стадии. В частности,
+    # стадии вроде «Сделка провалена» раньше не распознавались по названию и
+    # ошибочно попадали в «зависшие сделки» и «деньги под риском».
+    if status_class in {"st-ok", "st-bad"}:
+        return True
     if stage in TERMINAL_STAGES:
         return True
     s = (stage or "").lower()
@@ -216,7 +221,7 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
     # Карта телефонов для поиска дублей (первая встреченная сделка — эталон).
     seen_key: dict[str, Deal] = {}
     for d in sorted(deals, key=lambda x: x.position):
-        if is_terminal_stage(d.stage):
+        if is_terminal_stage(d.stage, d.status_class):
             continue
         key = _dup_value(d, cfg.dup_key)
         if key and key not in seen_key:
@@ -227,7 +232,7 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
 
     for deal in sorted(deals, key=lambda x: x.position):
         stage = deal.stage or ""
-        terminal = is_terminal_stage(stage)
+        terminal = is_terminal_stage(stage, deal.status_class)
         low = stage.lower()
         is_refusal = "отказ" in low or "lose" in low or "fail" in low
 

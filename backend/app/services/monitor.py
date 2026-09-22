@@ -72,7 +72,8 @@ async def stats(
     # «В норме» — доля сделок без нарушений (движок выдаёт не более одного
     # нарушения на сделку, поэтому len(regular) ≈ число проблемных сделок).
     total_stmt = _scope_stmt(
-        select(func.count()).select_from(Deal), mgr, legal_entity, funnel,
+        select(func.count()).select_from(Deal).where(Deal.status_class == "st-mid"),
+        mgr, legal_entity, funnel,
     )
     total = await session.scalar(total_stmt) or 0
     if total:

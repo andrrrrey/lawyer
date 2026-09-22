@@ -69,6 +69,23 @@ def test_threshold_sensitivity() -> None:
     with_seeded(check)
 
 
+def test_failed_semantic_stage_is_not_an_active_violation() -> None:
+    """Проваленная стадия исключается по семантике, даже при необычном названии."""
+    async def check(s: AsyncSession) -> None:
+        deal = (await s.execute(select(Deal).limit(1))).scalar_one()
+        deal.stage = "Сделка провалена"
+        deal.status_label = deal.stage
+        deal.status_class = "st-bad"
+        deal.stage_entered_at = deal.created_at
+        deal.amount = 50_000_000
+        await s.commit()
+
+        result = await vio.evaluate_current(s)
+        assert not any(item["ref"] == deal.ref for item in result["regular"])
+
+    with_seeded(check)
+
+
 def test_admin_history_and_rollback() -> None:
     async def check(s: AsyncSession) -> None:
         cfg = copy.deepcopy(await content.regulation(s))

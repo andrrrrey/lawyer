@@ -180,6 +180,36 @@ def test_kpis_follow_period_and_filters() -> None:
     with_real_data(check)
 
 
+def test_real_sla_kpis_are_calculated_instead_of_zero_placeholders() -> None:
+    """Первый контакт и просрочки в боевом режиме берутся из CRM-фактов."""
+    async def check(s: AsyncSession) -> None:
+        contacted = _deal(
+            20, days_ago=1, mgr="Иванов", src="Сайт", amount=0, won=False
+        )
+        contacted.entity_type = "lead"
+        contacted.funnel_id = "lead"
+        contacted.stage = "Квалификация"
+        contacted.status_label = contacted.stage
+        contacted.first_contact_at = contacted.created_at + timedelta(minutes=12)
+
+        overdue = _deal(
+            21, days_ago=1, mgr="Иванов", src="Сайт", amount=0, won=False
+        )
+        overdue.entity_type = "lead"
+        overdue.funnel_id = "lead"
+        overdue.stage = "Новое обращение"
+        overdue.status_label = overdue.stage
+        overdue.first_contact_at = None
+        s.add_all([contacted, overdue])
+        await s.commit()
+
+        values = await metrics._period_baseline(s, "7")
+        assert values["first_contact"] == 12
+        assert values["overdue"] >= 1
+
+    with_real_data(check)
+
+
 def test_expected_averages_and_deal_cycle_are_real() -> None:
     """Новые KPI считаются из стадий Bitrix, истории и поступлений 1С."""
     async def check(s: AsyncSession) -> None:
