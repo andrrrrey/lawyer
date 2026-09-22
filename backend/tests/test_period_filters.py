@@ -180,6 +180,21 @@ def test_kpis_follow_period_and_filters() -> None:
     with_real_data(check)
 
 
+def test_contracts_follow_success_close_date_not_creation_date() -> None:
+    """Заключённый договор попадает в период закрытия, даже если создан раньше."""
+    async def check(s: AsyncSession) -> None:
+        old_deal = await s.scalar(select(Deal).where(Deal.position == 4))
+        assert old_deal is not None
+        old_deal.closed_at = NOW - timedelta(days=1)
+        await s.commit()
+
+        values = await metrics._period_baseline(s, "30")
+        assert values["deals"] == 3  # созданы за 30 дней
+        assert values["contracts"] == 4  # успешно закрыты за 30 дней
+
+    with_real_data(check)
+
+
 def test_real_sla_kpis_are_calculated_instead_of_zero_placeholders() -> None:
     """Первый контакт и просрочки в боевом режиме берутся из CRM-фактов."""
     async def check(s: AsyncSession) -> None:

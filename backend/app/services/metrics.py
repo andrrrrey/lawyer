@@ -56,11 +56,6 @@ def _period_end(period: str | None, now: datetime) -> datetime | None:
     return per.end(period, now)
 
 
-def _aware_utc(value: datetime) -> datetime:
-    """SQLite в тестах теряет tzinfo; PostgreSQL возвращает aware datetime."""
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
-
 def _by_deal_filters(
     stmt, mgr: FilterValue = "all", source: str = "all", legal_entity: FilterValue = "all",
     funnel: FilterValue = "all",
@@ -316,58 +311,13 @@ async def _period_baseline(
 
     lead_rows = [deal for deal in rows if deal.entity_type == "lead"]
     deal_rows = [deal for deal in rows if deal.entity_type == "deal"]
-    # Заключённые договоры: сделка дошла до настроенной стадии ожидания оплаты
-    # («Договор (ждём деньги)» и аналоги) либо уже успешно завершена.
-    from app.services import business_settings
-
-    business_config = await business_settings.get_settings(session)
-    contract_stages = {
-        (str(item.get("crm_source")), str(item.get("external_id"))): {
-            str(stage).strip().casefold()
-            for stage in item.get("expected_payment_stages", [])
-            if str(stage).strip()
-        }
-        for item in business_config.get("funnels", []) if item.get("enabled", True)
-    }
-    deal_ids = [deal.id for deal in deal_rows]
-    deal_scope_by_id = {
-        deal.id: (deal.crm_source, deal.funnel_id) for deal in deal_rows
-    }
-    contract_start = _period_start(period, datetime.now(UTC))
-    contract_end = _period_end(period, datetime.now(UTC))
-    history_stmt = select(StageHistory).where(
-        StageHistory.deal_id.in_(deal_ids),
-        StageHistory.changed_at.is_not(None),
-        StageHistory.changed_at >= contract_start,
-    )
-    if contract_end is not None:
-        history_stmt = history_stmt.where(StageHistory.changed_at < contract_end)
-    history = list((await session.execute(
-        history_stmt
-    )).scalars().all()) if deal_ids else []
-    reached_contract = {
-        item.deal_id for item in history
-        if str(item.to_stage or "").strip().casefold()
-        in contract_stages.get(deal_scope_by_id.get(item.deal_id, ("", "")), set())
-    }
-    contracts = 0
-    for deal in deal_rows:
-        raw_closed = deal.closed_at or deal.created_at
-        closed = _aware_utc(raw_closed) if raw_closed is not None else None
-        successful_in_period = bool(
-            deal.status_class == "st-ok"
-            and closed is not None
-            and closed >= contract_start
-            and (contract_end is None or closed < contract_end)
-        )
-        currently_at_contract = bool(
-            contract_end is None
-            and str(deal.stage or "").strip().casefold()
-            in contract_stages.get((deal.crm_source, deal.funnel_id), set())
-        )
-        contracts += int(
-            successful_in_period or deal.id in reached_contract or currently_at_contract
-        )
+    # «Договоры заключены» повторяют бизнес-смысл колонки «Успешные сделки»:
+    # считаем сделки, которые закрыты успешно именно в выбранном периоде,
+    # независимо от даты их создания. Так старая сделка, выигранная сегодня,
+    # не теряется из цепочки и результат совпадает со стандартным отчётом Bitrix24.
+    contracts = len(await successful_deals(
+        session, period, mgr, source, legal_entity, funnel
+    ))
     # SLA-карточки раньше в боевом режиме были заглушками (всегда 0). Средний
     # первый контакт считаем по фактической первой активности Bitrix24 у лидов,
     # созданных в выбранном периоде. Если портал работает только со сделками,
