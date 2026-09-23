@@ -53,6 +53,35 @@ def test_bitrix_normalize_lead_marks_entity_and_lead_funnel() -> None:
     assert lead["stage"] == "IN_PROCESS"
 
 
+def test_bitrix_normalize_lead_resolves_source_auto_enumeration() -> None:
+    lead = bitrix24.normalize_lead(
+        {"ID": "77", "SOURCE_ID": "CALL", "UF_CRM_SOURCE_AUTO": "556"},
+        {"source_auto": "UF_CRM_SOURCE_AUTO"},
+        {"UF_CRM_SOURCE_AUTO": {"556": "Авито"}},
+    )
+
+    assert lead["src"] == "CALL"
+    assert lead["custom"]["source_auto"] == "Авито"
+
+
+def test_bitrix_lead_source_auto_uses_lead_field_definition(monkeypatch) -> None:
+    adapter = bitrix24.RealBitrix24Adapter(
+        webhook_url="https://example.test/rest/1/key", source_key="cloud"
+    )
+    monkeypatch.setattr(adapter, "_lead_field_definitions", lambda: [{
+        "code": "UF_CRM_LEAD_SOURCE_AUTO",
+        "title": "Источник (авто)",
+        "items": [{"ID": "556", "VALUE": "Авито"}],
+    }])
+
+    fields, values = adapter._lead_extra_fields({
+        "source_auto": "UF_CRM_DEAL_SOURCE_AUTO",
+    })
+
+    assert fields["source_auto"] == "UF_CRM_LEAD_SOURCE_AUTO"
+    assert values["UF_CRM_LEAD_SOURCE_AUTO"]["556"] == "Авито"
+
+
 def test_bitrix_normalize_stage_history_and_activities() -> None:
     history = bitrix24.normalize_stage_history({
         "ID": 90, "OWNER_ID": 3390, "STAGE_ID": "C1:WON",

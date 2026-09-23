@@ -8,6 +8,7 @@ import {
   type BitrixFunnelOption,
   type BitrixUserOption,
   type DdsArticle,
+  type ExpenseArticle,
   type Funnel,
   type Plan,
   useBitrixFunnels,
@@ -19,6 +20,7 @@ import {
   useExpenseArticles,
   useManualExpenses,
   useOneCReceiptJournal,
+  useRenameExpenseArticle,
   useSaveBusinessSettings,
 } from "@/api/businessSettings";
 import AdminPage from "@/pages/AdminPage";
@@ -50,12 +52,14 @@ export default function BusinessSettingsPage() {
     amount: 0, include_in_romi: false, channel: "", campaign: "", comment: "",
   });
   const [articleModalOpen, setArticleModalOpen] = useState(false);
+  const [editingArticle, setEditingArticle] = useState<ExpenseArticle | null>(null);
   const [newArticleName, setNewArticleName] = useState("");
   const receipts = useOneCReceiptJournal();
   const expenses = useManualExpenses();
   const expenseEntityKey = expenseDraft.legal_entity_key || query.data?.legal_entities[0]?.key || "";
   const expenseArticles = useExpenseArticles(expenseEntityKey);
   const createExpenseArticle = useCreateExpenseArticle();
+  const renameExpenseArticle = useRenameExpenseArticle();
   const createExpense = useCreateManualExpense();
   const deleteExpense = useDeleteManualExpense();
 
@@ -145,6 +149,9 @@ export default function BusinessSettingsPage() {
   const expenseSourceOptions = [...new Set([
     ...(dashboardFilters.data?.sources ?? []), ...savedExpenseSources,
   ])].map((value) => ({ value, label: value }));
+  const selectedExpenseArticle = (expenseArticles.data ?? []).find(
+    (item) => item.persisted && item.name === expenseDraft.article,
+  );
 
   const addExpense = async () => {
     const payload = {
@@ -162,20 +169,23 @@ export default function BusinessSettingsPage() {
     }
   };
 
-  const addExpenseArticle = async () => {
+  const saveExpenseArticle = async () => {
     const name = newArticleName.trim();
     if (!name || !expenseEntityKey) return;
     try {
-      const row = await createExpenseArticle.mutateAsync({
-        legal_entity_key: expenseEntityKey,
-        name,
-      });
+      const row = editingArticle?.id
+        ? await renameExpenseArticle.mutateAsync({ id: editingArticle.id, name })
+        : await createExpenseArticle.mutateAsync({
+            legal_entity_key: expenseEntityKey,
+            name,
+          });
       setExpenseDraft((current) => ({ ...current, article: row.name }));
       setNewArticleName("");
+      setEditingArticle(null);
       setArticleModalOpen(false);
-      message.success("Статья расхода создана");
+      message.success(editingArticle ? "Название статьи обновлено" : "Статья расхода создана");
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "Не удалось создать статью");
+      message.error(error instanceof Error ? error.message : "Не удалось сохранить статью");
     }
   };
 
@@ -445,8 +455,19 @@ export default function BusinessSettingsPage() {
                     onChange={(value) => setExpenseDraft((x) => ({ ...x, article: value }))}
                     notFoundContent="Нет статей — создайте первую"
                   />
-                  <Button onClick={() => setArticleModalOpen(true)}>
+                  <Button onClick={() => { setEditingArticle(null); setNewArticleName(""); setArticleModalOpen(true); }}>
                     Создать статью расхода
+                  </Button>
+                  <Button
+                    disabled={!selectedExpenseArticle?.id}
+                    onClick={() => {
+                      if (!selectedExpenseArticle) return;
+                      setEditingArticle(selectedExpenseArticle);
+                      setNewArticleName(selectedExpenseArticle.name);
+                      setArticleModalOpen(true);
+                    }}
+                  >
+                    Переименовать
                   </Button>
                 </div>
               </div>
@@ -485,14 +506,14 @@ export default function BusinessSettingsPage() {
             ]} />
           </Card>
           <Modal
-            title="Создать статью расхода"
+            title={editingArticle ? "Переименовать статью расхода" : "Создать статью расхода"}
             open={articleModalOpen}
-            okText="Создать"
+            okText={editingArticle ? "Сохранить" : "Создать"}
             cancelText="Отмена"
-            confirmLoading={createExpenseArticle.isPending}
+            confirmLoading={createExpenseArticle.isPending || renameExpenseArticle.isPending}
             okButtonProps={{ disabled: !newArticleName.trim() || !expenseEntityKey }}
-            onOk={addExpenseArticle}
-            onCancel={() => { setArticleModalOpen(false); setNewArticleName(""); }}
+            onOk={saveExpenseArticle}
+            onCancel={() => { setArticleModalOpen(false); setEditingArticle(null); setNewArticleName(""); }}
           >
             <div className="field" style={{ marginTop: 16 }}>
               <label>Юридическое лицо</label>
@@ -509,7 +530,7 @@ export default function BusinessSettingsPage() {
                 placeholder="Например, Аренда офиса"
                 value={newArticleName}
                 onChange={(event) => setNewArticleName(event.target.value)}
-                onPressEnter={addExpenseArticle}
+                onPressEnter={saveExpenseArticle}
               />
             </div>
           </Modal>

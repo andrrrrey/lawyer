@@ -205,12 +205,17 @@ def normalize_deal(
     }
 
 
-def normalize_lead(raw: dict, extra_fields: dict[str, str] | None = None) -> dict:
+def normalize_lead(
+    raw: dict,
+    extra_fields: dict[str, str] | None = None,
+    extra_value_maps: dict[str, dict[str, str]] | None = None,
+) -> dict:
     """Лид Bitrix24 → та же нейтральная модель, что и сделка."""
     lead_id = raw.get("ID") or raw.get("id")
     custom: dict[str, str] = {}
     for key, code in (extra_fields or {}).items():
-        custom[key] = _coerce(raw.get(code))
+        value = _coerce(raw.get(code))
+        custom[key] = (extra_value_maps or {}).get(code, {}).get(value, value)
     return {
         "external_id": str(lead_id) if lead_id is not None else None,
         "ref": f"Лид #{lead_id}" if lead_id is not None else "",
@@ -318,6 +323,7 @@ class RealBitrix24Adapter:
         self.webhook_url = webhook_url
         self.source_key = source_key
         self._deal_fields_cache: list[dict] | None = None
+        self._lead_fields_cache: list[dict] | None = None
 
     def _call(self, method: str, params: dict | None = None) -> list[dict]:
         # Два аргумента сохраняют совместимость тестов, подменяющих модульную функцию.
@@ -403,13 +409,14 @@ class RealBitrix24Adapter:
         modified_after: str | None = None,
     ) -> list[dict]:
         """Лиды портала для отдельной лид-воронки."""
+        effective_fields, value_maps = self._lead_extra_fields(extra_fields)
         select = [
             "ID", "TITLE", "STATUS_ID", "STATUS_SEMANTIC_ID", "ASSIGNED_BY_ID",
             "CONTACT_ID", "SOURCE_ID", "OPPORTUNITY", "DATE_CREATE", "DATE_MODIFY",
             "UTM_SOURCE", "UTM_CAMPAIGN",
         ]
         select += [
-            code for code in {value for value in (extra_fields or {}).values() if value}
+            code for code in {value for value in effective_fields.values() if value}
             if code not in select
         ]
         params: dict[str, Any] = {"select": select}
@@ -420,7 +427,7 @@ class RealBitrix24Adapter:
             params["filter"] = {">=DATE_CREATE": created_after}
             params["order"] = {"DATE_CREATE": "DESC"}
         rows = [
-            normalize_lead(item, extra_fields)
+            normalize_lead(item, effective_fields, value_maps)
             for item in self._call_list_by_id("crm.lead.list", params)
         ]
         for row in rows:
@@ -488,6 +495,68 @@ class RealBitrix24Adapter:
             code = str(item.get("code") or "")
             if code not in selected_codes:
                 continue
+            value_maps[code] = {
+                str(option.get("ID")): str(option.get("VALUE") or option.get("ID"))
+                for option in item.get("items", [])
+                if option.get("ID") is not None
+            }
+        return effective, value_maps
+
+    def _lead_field_definitions(self) -> list[dict]:
+        """Метаданные полей лидов, включая значения списочных полей."""
+        if self._lead_fields_cache is not None:
+            return self._lead_fields_cache
+        result = self._rest("crm.lead.fields", {})
+        out: list[dict] = []
+        for code, meta in (result.items() if isinstance(result, dict) else []):
+            details = meta or {}
+            title = (
+                details.get("formLabel") or details.get("listLabel")
+                or details.get("title") or code
+            )
+            out.append({
+                "code": code,
+                "title": str(title),
+                "items": list(details.get("items") or []),
+            })
+        self._lead_fields_cache = out
+        return out
+
+    def _lead_extra_fields(
+        self, extra_fields: dict[str, str] | None,
+    ) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+        """Находит отдельное поле «Источник (авто)» сущности lead.
+
+        Пользовательские поля сделок и лидов принадлежат разным схемам Bitrix24.
+        Поэтому код, сохранённый для сделки, нельзя без проверки отправлять в
+        crm.lead.list: поле лида ищется по названию в каждом портале отдельно.
+        """
+        try:
+            definitions = self._lead_field_definitions()
+        except Exception as exc:  # noqa: BLE001 — SOURCE_ID остаётся резервом
+            logger.warning(
+                "Битрикс24 (%s): метаданные полей лидов недоступны: %s",
+                self.source_key, exc,
+            )
+            return {}, {}
+        by_code = {str(item.get("code") or ""): item for item in definitions}
+        effective = {
+            key: code for key, code in (extra_fields or {}).items()
+            if code in by_code
+        }
+        source_auto = next(
+            (
+                item for item in definitions
+                if str(item.get("title") or "").strip().casefold()
+                == "источник (авто)"
+            ),
+            None,
+        )
+        if source_auto and source_auto.get("code"):
+            effective["source_auto"] = str(source_auto["code"])
+        value_maps: dict[str, dict[str, str]] = {}
+        for code in set(effective.values()):
+            item = by_code.get(code, {})
             value_maps[code] = {
                 str(option.get("ID")): str(option.get("VALUE") or option.get("ID"))
                 for option in item.get("items", [])

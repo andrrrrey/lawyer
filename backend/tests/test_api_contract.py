@@ -230,6 +230,26 @@ def test_expense_article_catalog(client: TestClient) -> None:
         "legal_entity_key": "uo", "name": "аренда офиса",
     })
     assert duplicate.status_code == 409
+
+    expense = client.post("/api/admin/expenses", json={
+        "spent_at": "2026-09-03",
+        "legal_entity_key": "uo",
+        "article": "Аренда офиса",
+        "amount": 1000,
+        "include_in_romi": False,
+    })
+    assert expense.status_code == 201
+    renamed = client.patch(
+        f"/api/admin/expense-articles/{created.json()['id']}",
+        json={"name": "Аренда помещения"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Аренда помещения"
+    expenses = client.get("/api/admin/expenses").json()
+    assert any(
+        item["id"] == expense.json()["id"] and item["article"] == "Аренда помещения"
+        for item in expenses
+    )
     assert client.get(
         "/api/admin/expense-articles", params={"legal_entity_key": "missing"}
     ).status_code == 422

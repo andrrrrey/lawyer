@@ -62,7 +62,7 @@ export default function DashboardPage() {
         <ChartCard title="Воронка обработки" sub="уникальные обращения и сделки за период → стадия ожидания оплаты → подтверждённая оплата 1С">
           {funnel.data ? <EChart option={funnelOption(funnel.data)} height={280} /> : <Spin />}
         </ChartCard>
-        <ChartCard title="Источники лидов" sub="по источнику сделки">
+        <ChartCard title="Источники лидов" sub="Источник (авто) · резерв: Источник">
           {sources.data ? <EChart option={sourcesBarOption(sources.data)} height={320} /> : <Spin />}
         </ChartCard>
       </div>

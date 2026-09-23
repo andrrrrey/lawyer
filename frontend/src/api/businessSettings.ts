@@ -227,6 +227,21 @@ export function useCreateExpenseArticle() {
   });
 }
 
+export function useRenameExpenseArticle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      api.patch<ExpenseArticle>(`/admin/expense-articles/${id}`, { name }),
+    onSuccess: (row) => {
+      qc.invalidateQueries({ queryKey: ["admin", "expense-articles", row.legal_entity_key] });
+      qc.invalidateQueries({ queryKey: ["admin", "expenses"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["romi"] });
+    },
+  });
+}
+
 export function useManualExpenses() {
   return useQuery<ManualExpense[]>({
     queryKey: ["admin", "expenses"],

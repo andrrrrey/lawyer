@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -150,6 +150,10 @@ class ManualExpensePayload(BaseModel):
 
 class ExpenseArticlePayload(BaseModel):
     legal_entity_key: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+
+
+class ExpenseArticleRenamePayload(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
 
@@ -373,6 +377,48 @@ async def create_expense_article(
         await session.rollback()
         raise HTTPException(status_code=409, detail="Такая статья уже есть") from exc
     await session.refresh(row)
+    return {
+        "id": row.id, "name": row.name, "legal_entity_key": row.legal_entity_key,
+        "source": "catalog", "source_label": "Справочник", "persisted": True,
+    }
+
+
+@router.patch("/expense-articles/{article_id}")
+async def rename_expense_article(
+    article_id: int,
+    payload: ExpenseArticleRenamePayload,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Переименовывает статью и связанные с ней ручные расходы."""
+    row = await session.get(ExpenseArticle, article_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Статья расхода не найдена")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Укажите наименование статьи")
+    siblings = (await session.execute(
+        select(ExpenseArticle).where(
+            ExpenseArticle.legal_entity_key == row.legal_entity_key,
+            ExpenseArticle.id != row.id,
+        )
+    )).scalars().all()
+    if any(item.name.casefold() == name.casefold() for item in siblings):
+        raise HTTPException(status_code=409, detail="Такая статья уже есть в справочнике")
+    old_name = row.name
+    row.name = name
+    await session.execute(
+        update(ManualExpense)
+        .where(
+            ManualExpense.legal_entity_key == row.legal_entity_key,
+            ManualExpense.article == old_name,
+        )
+        .values(article=name)
+    )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Такая статья уже есть") from exc
     return {
         "id": row.id, "name": row.name, "legal_entity_key": row.legal_entity_key,
         "source": "catalog", "source_label": "Справочник", "persisted": True,
