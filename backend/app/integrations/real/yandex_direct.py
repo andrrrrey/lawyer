@@ -154,13 +154,16 @@ class RealYandexDirectAdapter:
             "date": r.get("Date") or None,
             "campaign_id": r.get("CampaignId", ""),
             "campaign": r.get("CampaignName", ""),
-            "spend_gross": int(float(r.get("Cost", 0) or 0)),
+            "spend_gross": float(r.get("Cost", 0) or 0),
             "clicks": int(float(r.get("Clicks", 0) or 0)),
             "impressions": int(float(r.get("Impressions", 0) or 0)),
         } for r in rows if r.get("CampaignName")]
 
     def fetch_search_queries(self) -> list[dict]:
-        fields = ["Query", "CampaignName", "Impressions", "Cost", "Clicks", "Conversions"]
+        fields = [
+            "Date", "Query", "CampaignName", "Impressions", "Cost", "Clicks",
+            "Conversions",
+        ]
         date_from, date_to = _window()
         body = {"params": {
             "SelectionCriteria": {"DateFrom": date_from, "DateTo": date_to},
@@ -174,10 +177,11 @@ class RealYandexDirectAdapter:
         }}
         rows = self._report(body, fields)
         return [{
+            "date": r.get("Date") or None,
             "phrase": r.get("Query", ""),
             "camp": r.get("CampaignName", ""),
             "shows": int(float(r.get("Impressions", 0) or 0)),
-            "spend": int(float(r.get("Cost", 0) or 0)),
+            "spend": float(r.get("Cost", 0) or 0),
             "clicks": int(float(r.get("Clicks", 0) or 0)),
             "conv": int(float(r.get("Conversions", 0) or 0)),
         } for r in rows if r.get("Query")]

@@ -25,9 +25,9 @@ def test_deduplicate_crm_rows_keeps_first_deal_and_lead_separately() -> None:
 
 def test_aggregate_channels_vat_net() -> None:
     costs = [
-        {"campaign": "Поиск · Бренд", "spend_gross": 120000, "clicks": 100, "impressions": 4000},
-        {"campaign": "Поиск · Категорийные", "spend_gross": 60000, "clicks": 50, "impressions": 2000},
-        {"campaign": "РСЯ · Look-alike", "spend_gross": 120000, "clicks": 200, "impressions": 9000},
+        {"date": "2025-12-31", "campaign": "Поиск · Бренд", "spend_gross": 120000, "clicks": 100, "impressions": 4000},
+        {"date": "2025-12-31", "campaign": "Поиск · Категорийные", "spend_gross": 60000, "clicks": 50, "impressions": 2000},
+        {"date": "2025-12-31", "campaign": "РСЯ · Look-alike", "spend_gross": 120000, "clicks": 200, "impressions": 9000},
     ]
     channels = ingest.aggregate_channels(costs)
     by_name = {c["name"]: c for c in channels}
@@ -35,6 +35,36 @@ def test_aggregate_channels_vat_net() -> None:
     assert by_name["Яндекс Директ — Поиск"]["spend"] == 150000
     assert len(by_name["Яндекс Директ — Поиск"]["campaigns"]) == 2
     assert by_name["Яндекс Директ — РСЯ"]["spend"] == 100000
+
+
+def test_aggregate_channels_uses_22_percent_vat_from_2026() -> None:
+    costs = [{
+        "date": "2026-09-01",
+        "campaign": "Поиск · Бренд",
+        "spend_gross": 122000,
+        "clicks": 100,
+        "impressions": 4000,
+    }]
+
+    channels = ingest.aggregate_channels(costs)
+
+    assert channels[0]["spend"] == 100000
+
+
+def test_minus_words_aggregate_daily_rows_after_vat_normalization() -> None:
+    queries = [
+        {"date": "2026-09-01", "phrase": "запрос", "camp": "Поиск",
+         "spend": 61, "shows": 10, "clicks": 1, "conv": 0},
+        {"date": "2026-09-02", "phrase": "запрос", "camp": "Поиск",
+         "spend": 61, "shows": 20, "clicks": 2, "conv": 0},
+    ]
+
+    rows = ingest.minus_word_candidates(queries)
+
+    assert rows == [{
+        "phrase": "запрос", "camp": "Поиск", "shows": 30, "clicks": 3,
+        "spend": 100, "reason": "Расход без конверсий",
+    }]
 
 
 def test_manual_expense_is_attributed_by_bitrix_source() -> None:

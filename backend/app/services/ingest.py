@@ -245,7 +245,7 @@ def _row_spend_net(row: dict) -> int:
     """
     if row.get("spend") is not None:
         return int(row["spend"] or 0)
-    return round(romi.vat_to_net(row.get("spend_gross", 0)))
+    return round(romi.vat_to_net(row.get("spend_gross", 0), row.get("date")))
 
 
 def aggregate_channels(
@@ -409,15 +409,26 @@ def minus_word_candidates(search_queries: list[dict]) -> list[dict]:
     """Кандидаты в минус-слова: поисковые запросы с расходом и без конверсий.
 
     Это фразы, на которые тратится бюджет без результата — топ по расходу (без НДС)."""
-    out: list[dict] = []
+    grouped: dict[tuple[str, str], dict] = {}
     for q in search_queries:
-        spend_net = round(romi.vat_to_net(q.get("spend", 0)))
-        if spend_net <= 0 or int(q.get("conv") or 0) > 0:
+        spend_net = round(romi.vat_to_net(q.get("spend", 0), q.get("date")))
+        key = (str(q.get("phrase") or ""), str(q.get("camp") or ""))
+        item = grouped.setdefault(key, {
+            "phrase": key[0], "camp": key[1], "shows": 0, "clicks": 0,
+            "spend": 0, "conv": 0,
+        })
+        item["shows"] += int(q.get("shows") or 0)
+        item["clicks"] += int(q.get("clicks") or 0)
+        item["spend"] += spend_net
+        item["conv"] += int(q.get("conv") or 0)
+    out: list[dict] = []
+    for item in grouped.values():
+        if item["spend"] <= 0 or item["conv"] > 0:
             continue
         out.append({
-            "phrase": q.get("phrase", ""), "camp": q.get("camp", ""),
-            "shows": int(q.get("shows") or 0), "clicks": int(q.get("clicks") or 0),
-            "spend": spend_net, "reason": "Расход без конверсий",
+            "phrase": item["phrase"], "camp": item["camp"],
+            "shows": item["shows"], "clicks": item["clicks"],
+            "spend": item["spend"], "reason": "Расход без конверсий",
         })
     out.sort(key=lambda x: x["spend"], reverse=True)
     return out[:_MINUS_WORD_LIMIT]

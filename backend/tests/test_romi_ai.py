@@ -10,8 +10,10 @@ from app.services import romi
 
 
 def test_vat_normalization() -> None:
-    assert round(romi.vat_to_net(120)) == 100
-    assert round(romi.vat_to_gross(100)) == 120
+    assert round(romi.vat_to_net(120, "2025-12-31")) == 100
+    assert round(romi.vat_to_gross(100, "2025-12-31")) == 120
+    assert round(romi.vat_to_net(122, "2026-01-01")) == 100
+    assert round(romi.vat_to_gross(100, "2026-01-01")) == 122
 
 
 def test_romi_formula() -> None:

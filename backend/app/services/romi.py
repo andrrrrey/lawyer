@@ -13,17 +13,35 @@
 
 from __future__ import annotations
 
-VAT_RATE = 0.20
+from datetime import date, datetime
+
+VAT_RATE_BEFORE_2026 = 0.20
+VAT_RATE_FROM_2026 = 0.22
+VAT_RATE_CHANGE_DATE = date(2026, 1, 1)
 
 
-def vat_to_net(gross: float) -> float:
-    """Сумма с НДС → без НДС (единая база для сопоставления с Метрикой)."""
-    return gross / (1 + VAT_RATE)
+def vat_rate(value: date | datetime | str | None = None) -> float:
+    """Ставка НДС для даты расхода; без даты сохраняем прежнюю ставку 20%."""
+    if isinstance(value, datetime):
+        value = value.date()
+    elif isinstance(value, str):
+        try:
+            value = date.fromisoformat(value[:10])
+        except ValueError:
+            value = None
+    if value and value >= VAT_RATE_CHANGE_DATE:
+        return VAT_RATE_FROM_2026
+    return VAT_RATE_BEFORE_2026
 
 
-def vat_to_gross(net: float) -> float:
-    """Сумма без НДС → с НДС."""
-    return net * (1 + VAT_RATE)
+def vat_to_net(gross: float, occurred_on: date | datetime | str | None = None) -> float:
+    """Сумма с НДС → без НДС по ставке, действующей на дату расхода."""
+    return gross / (1 + vat_rate(occurred_on))
+
+
+def vat_to_gross(net: float, occurred_on: date | datetime | str | None = None) -> float:
+    """Сумма без НДС → с НДС по ставке, действующей на указанную дату."""
+    return net * (1 + vat_rate(occurred_on))
 
 
 def romi(revenue: float, spend: float | None) -> int | None:

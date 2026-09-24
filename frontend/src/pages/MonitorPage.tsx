@@ -24,6 +24,7 @@ const VIOLATION_TYPE_OPTIONS = [
   ...Object.entries(PTYPE_LABEL)
     .filter(([key]) => key !== "spam" && key !== "refusal")
     .map(([value, label]) => ({ value, label })),
+  { value: "review", label: "Отказы / спам на проверке" },
 ];
 
 // Подписи фильтра по серьёзности (плашки статистики) — совпадают с подписями плашек.
@@ -44,7 +45,8 @@ export default function MonitorPage() {
   const funnels = params.getAll("funnel");
   const legalScopeKey = legalEntities.join("|");
   const funnelScopeKey = funnels.join("|");
-  const isReviewFilter = filter === "spam" || filter === "refusal" || sev === "review";
+  const isReviewFilter =
+    filter === "review" || filter === "spam" || filter === "refusal" || sev === "review";
 
   const scope = { legalEntities, funnels };
   const filterOptions = useFilterOptions();
@@ -80,6 +82,7 @@ export default function MonitorPage() {
   // Пагинация списка «Требует решения руководителя» (оценочные — их много).
   const [reviewPage, setReviewPage] = useState(0);
   const reviewTotal = review.data?.length ?? 0;
+  const displayedTotal = isReviewFilter ? reviewTotal : total;
   const reviewPages = Math.max(1, Math.ceil(reviewTotal / PAGE_SIZE));
   const reviewRows = review.data?.slice(
     reviewPage * PAGE_SIZE, reviewPage * PAGE_SIZE + PAGE_SIZE) ?? [];
@@ -196,7 +199,7 @@ export default function MonitorPage() {
           <div className="violation-filter-field">
             <span>Тип нарушения</span>
             <Select
-              value={filter ?? "all"}
+              value={filter === "spam" || filter === "refusal" ? "review" : filter ?? "all"}
               options={VIOLATION_TYPE_OPTIONS}
               style={{ width: 260 }}
               onChange={(value) => updateParams((next) => {
@@ -250,7 +253,7 @@ export default function MonitorPage() {
             />
           </div>
           <div className="violation-filter-summary">
-            <span>Найдено: <b>{total}</b></span>
+            <span>Найдено: <b>{displayedTotal}</b></span>
             {filter || dateFrom || dateTo || legalEntities.length || funnels.length ? (
               <Button type="link" size="small" onClick={clearListFilters}>Сбросить</Button>
             ) : null}

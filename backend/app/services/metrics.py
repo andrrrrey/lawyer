@@ -975,7 +975,7 @@ async def attention(
          "cls": "amber", "icon": "touch", "drill": "monitor:no_recontact"},
         {"n": len(review), "label": "Отказы / спам на проверке",
          "sub": "оценочные нарушения",
-         "cls": "violet", "icon": "flag", "drill": "monitor:spam"},
+         "cls": "violet", "icon": "flag", "drill": "monitor:review"},
         {"n": _count("fields"), "label": "Не заполнены поля",
          "sub": "обязательные поля сделки",
          "cls": "amber", "icon": "romi", "drill": "monitor:fields"},
