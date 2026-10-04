@@ -252,9 +252,9 @@ async def sync_yandex(
         await session.execute(delete(BudgetRec))
         for index, item in enumerate(ingest.minus_word_candidates(search_queries)):
             session.add(MinusWord(
-                position=index, phrase=item["phrase"], camp=item["camp"],
+                position=index, phrase=str(item["phrase"]), camp=str(item["camp"])[:128],
                 shows=item["shows"], clicks=item["clicks"], spend=item["spend"],
-                conv=0, deals=0, reason=item["reason"], status="new",
+                conv=0, deals=0, reason=str(item["reason"])[:96], status="new",
             ))
         for index, item in enumerate(ingest.budget_recs_from_channels(channels)):
             session.add(BudgetRec(

@@ -1481,9 +1481,9 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
 
     for i, mw in enumerate(minus_words):
         session.add(MinusWord(
-            position=i, phrase=mw["phrase"], camp=mw["camp"],
+            position=i, phrase=str(mw["phrase"]), camp=str(mw["camp"])[:128],
             shows=mw["shows"], clicks=mw["clicks"], spend=mw["spend"],
-            conv=0, deals=0, reason=mw["reason"], status="new",
+            conv=0, deals=0, reason=str(mw["reason"])[:96], status="new",
         ))
     for i, rec in enumerate(budget_recs):
         session.add(BudgetRec(

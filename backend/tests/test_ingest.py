@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from sqlalchemy import Text
+
+from app.models import MinusWord
 from app.services import ingest
 
 
@@ -65,6 +68,10 @@ def test_minus_words_aggregate_daily_rows_after_vat_normalization() -> None:
         "phrase": "запрос", "camp": "Поиск", "shows": 30, "clicks": 3,
         "spend": 100, "reason": "Расход без конверсий",
     }]
+
+
+def test_minus_word_phrase_has_no_length_limit() -> None:
+    assert isinstance(MinusWord.__table__.c.phrase.type, Text)
 
 
 def test_manual_expense_is_attributed_by_bitrix_source() -> None:

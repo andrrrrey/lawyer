@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, BigInteger, Boolean, Float, Integer, String
+from sqlalchemy import JSON, BigInteger, Boolean, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -95,7 +95,7 @@ class MinusWord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
-    phrase: Mapped[str] = mapped_column(String(255))
+    phrase: Mapped[str] = mapped_column(Text)
     camp: Mapped[str] = mapped_column(String(128), default="")
     level: Mapped[str] = mapped_column(String(48), default="")
     shows: Mapped[int] = mapped_column(BigInteger, default=0)
