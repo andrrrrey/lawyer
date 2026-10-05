@@ -19,7 +19,9 @@ import { antdTheme } from "@/theme";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { refetchOnWindowFocus: false, retry: 1 },
+    // Данные витрин меняются после синхронизаций, а не каждую секунду. Короткий
+    // кэш убирает повторную загрузку всех тяжёлых блоков при возврате на дашборд.
+    queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 60_000 },
   },
 });
 

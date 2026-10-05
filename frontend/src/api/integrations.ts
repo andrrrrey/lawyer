@@ -192,6 +192,7 @@ export function useRecomputeStatus() {
   return useQuery<RecomputeStatus>({
     queryKey: ["integrations", "recompute", "status"],
     queryFn: () => api.get("/integrations/recompute/status"),
+    staleTime: 0,
     refetchInterval: (q) => (q.state.data?.state === "running" ? 1500 : false),
   });
 }
@@ -228,10 +229,18 @@ export function useStartYandexSync() {
   });
 }
 
+export function useStartYandexSearchQueriesSync() {
+  return useMutation({
+    mutationFn: () =>
+      api.post<RecomputeStatus>("/integrations/yandex/sync/search-queries"),
+  });
+}
+
 export function useYandexSyncStatus() {
   return useQuery<RecomputeStatus>({
     queryKey: ["integrations", "yandex", "sync", "status"],
     queryFn: () => api.get("/integrations/yandex/sync/status"),
+    staleTime: 0,
     refetchInterval: (q) => (q.state.data?.state === "running" ? 1500 : false),
   });
 }

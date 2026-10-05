@@ -171,16 +171,36 @@ export interface OneCReceiptJournalRow {
   operation: string;
   amount: number;
   crm_external_id: string;
+  crm_entity_type: string;
+  crm_source: string;
   matched: boolean;
   excluded: boolean;
   reason: string;
+  match_reason: string;
+  deal_status: string;
 }
 
-export function useOneCReceiptJournal() {
+export function useOneCReceiptJournal(state = "all") {
   return useQuery<OneCReceiptJournalRow[]>({
-    queryKey: ["admin", "one-c", "receipts"],
-    queryFn: () => api.get("/admin/one-c/receipts"),
+    queryKey: ["admin", "one-c", "receipts", state],
+    queryFn: () => api.get(`/admin/one-c/receipts?state=${encodeURIComponent(state)}`),
   });
+}
+
+export async function downloadOneCUnmatchedReport() {
+  const response = await fetch("/api/admin/one-c/unmatched-report", {
+    credentials: "include",
+  });
+  if (!response.ok) throw new Error(`Не удалось сформировать отчёт: HTTP ${response.status}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `onec_unmatched_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export interface ManualExpense {

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +19,7 @@ from app.api.deps import AuthUser, require_owner
 from app.core.config import settings as app_settings
 from app.core.db import get_session
 from app.core.security import hash_password
-from app.models import AppUser, ExpenseArticle, ManualExpense, OneCReceipt
+from app.models import AppUser, Deal, ExpenseArticle, ManualExpense, OneCReceipt
 from app.services import admin, business_settings, content
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_owner)])
@@ -246,6 +249,14 @@ async def get_one_c_receipts(
             stmt.order_by(OneCReceipt.registrar_date.desc()).limit(min(max(limit, 1), 1000))
         )
     ).scalars().all()
+    external_ids = {row.crm_external_id for row in rows if row.crm_external_id}
+    candidate_rows = (await session.execute(
+        select(Deal).where(Deal.external_id.in_(external_ids))
+    )).scalars().all() if external_ids else []
+    candidates: dict[str, list[Deal]] = {}
+    for deal in candidate_rows:
+        candidates.setdefault(str(deal.external_id), []).append(deal)
+
     return [
         {
             "id": row.id,
@@ -258,12 +269,106 @@ async def get_one_c_receipts(
             "operation": row.operation,
             "amount": float(row.amount),
             "crm_external_id": row.crm_external_id,
+            "crm_entity_type": row.crm_entity_type,
+            "crm_source": row.crm_source,
             "matched": row.matched_deal_id is not None,
             "excluded": row.excluded,
             "reason": row.exclusion_reason,
+            **_receipt_match_info(row, candidates.get(row.crm_external_id, [])),
         }
         for row in rows
     ]
+
+
+def _receipt_match_info(row: OneCReceipt, candidates: list[Deal]) -> dict[str, str]:
+    """Объясняет интегратору, почему конкретное поступление не сопоставилось."""
+    candidate_status = "; ".join(
+        f"{deal.crm_source}:{deal.external_id} — {deal.status_label or deal.stage or 'без статуса'}"
+        for deal in candidates
+    )
+    if row.excluded:
+        reason = row.exclusion_reason or "Операция исключена настройками статьи ДДС"
+        return {"match_reason": reason, "deal_status": candidate_status}
+    if row.matched_deal_id is not None:
+        return {"match_reason": "Сопоставлено", "deal_status": candidate_status}
+    if not row.crm_external_id:
+        reason = "В заказе 1С не передан ID сделки Bitrix24"
+    elif row.crm_entity_type and row.crm_entity_type.casefold() not in {"deal", "сделка"}:
+        reason = f"Передан тип Bitrix24 «{row.crm_entity_type}» вместо deal/Сделка"
+    elif not row.legal_entity_key:
+        reason = "Не определено юридическое лицо поступления"
+    elif not candidates:
+        reason = f"Сделка Bitrix24 ID {row.crm_external_id} не найдена в загруженных воронках"
+    else:
+        matching_entity = [d for d in candidates if d.legal_entity_key == row.legal_entity_key]
+        if not matching_entity:
+            reason = "Сделка найдена, но относится к другому юридическому лицу"
+        elif row.crm_source and not any(d.crm_source == row.crm_source for d in matching_entity):
+            reason = "Сделка найдена, но относится к другому порталу Bitrix24"
+        else:
+            reason = "Найдено несколько кандидатов или параметры связи неоднозначны"
+    return {"match_reason": reason, "deal_status": candidate_status}
+
+
+def _one_c_order_number(row: OneCReceipt) -> str:
+    raw = row.raw if isinstance(row.raw, dict) else {}
+    order = raw.get("Заказ") or raw.get("заказ") or raw.get("order") or {}
+    if not isinstance(order, dict):
+        return ""
+    return str(order.get("Номер") or order.get("номер") or order.get("number") or "")
+
+
+@router.get("/one-c/unmatched-report")
+async def download_one_c_unmatched_report(
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """CSV для интегратора 1С: все несопоставленные поступления и точная причина."""
+    rows = (await session.execute(
+        select(OneCReceipt)
+        .where(
+            OneCReceipt.excluded.is_(False),
+            OneCReceipt.matched_deal_id.is_(None),
+        )
+        .order_by(OneCReceipt.registrar_date.desc(), OneCReceipt.id.desc())
+        .limit(10_000)
+    )).scalars().all()
+    external_ids = {row.crm_external_id for row in rows if row.crm_external_id}
+    deals = (await session.execute(
+        select(Deal).where(Deal.external_id.in_(external_ids))
+    )).scalars().all() if external_ids else []
+    candidates: dict[str, list[Deal]] = {}
+    for deal in deals:
+        candidates.setdefault(str(deal.external_id), []).append(deal)
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";", lineterminator="\n")
+    writer.writerow([
+        "Дата поступления", "Документ 1С", "Заказ покупателя", "Юрлицо",
+        "Контрагент", "Сумма", "Тип Bitrix", "ID сделки Bitrix", "Портал Bitrix",
+        "Статус найденной сделки", "Причина несопоставления",
+    ])
+    for row in rows:
+        info = _receipt_match_info(row, candidates.get(row.crm_external_id, []))
+        writer.writerow([
+            row.registrar_date.strftime("%d.%m.%Y") if row.registrar_date else "",
+            row.registrar_number,
+            _one_c_order_number(row),
+            row.organization_name or row.legal_entity_key,
+            row.counterparty_name,
+            str(row.amount).replace(".", ","),
+            row.crm_entity_type,
+            row.crm_external_id,
+            row.crm_source,
+            info["deal_status"],
+            info["match_reason"],
+        ])
+    payload = "\ufeff" + output.getvalue()
+    filename = f"onec_unmatched_{date.today().isoformat()}.csv"
+    return Response(
+        content=payload.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/expenses")

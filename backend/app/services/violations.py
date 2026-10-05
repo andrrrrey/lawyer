@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,6 +14,9 @@ from app.services import business_settings, content, reglament
 from app.services.clock import reference_now
 
 FilterValue = str | list[str]
+_CACHE_TTL_SECONDS = 30.0
+_evaluation_cache: dict[tuple, tuple[float, dict]] = {}
+_evaluation_locks: dict[tuple, asyncio.Lock] = {}
 
 
 def _values(value: FilterValue) -> list[str]:
@@ -20,6 +26,39 @@ def _values(value: FilterValue) -> list[str]:
 
 
 async def evaluate_current(
+    session: AsyncSession,
+    mgr: str | list[str] = "all",
+    source: str = "all",
+    legal_entity: FilterValue = "all",
+    funnel: FilterValue = "all",
+) -> dict:
+    """Кэширует одинаковый расчёт, который дашборд запрашивает несколькими блоками."""
+    key = (
+        tuple(sorted(_values(mgr))),
+        source or "all",
+        tuple(sorted(_values(legal_entity))),
+        tuple(sorted(_values(funnel))),
+    )
+    now = time.monotonic()
+    cached = _evaluation_cache.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+    lock = _evaluation_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        cached = _evaluation_cache.get(key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        result = await _evaluate_current_uncached(
+            session, mgr=mgr, source=source,
+            legal_entity=legal_entity, funnel=funnel,
+        )
+        if len(_evaluation_cache) >= 128:
+            _evaluation_cache.clear()
+        _evaluation_cache[key] = (time.monotonic() + _CACHE_TTL_SECONDS, result)
+        return result
+
+
+async def _evaluate_current_uncached(
     session: AsyncSession,
     mgr: str | list[str] = "all",
     source: str = "all",

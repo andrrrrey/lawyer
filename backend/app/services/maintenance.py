@@ -244,6 +244,73 @@ def run_yandex_sync_blocking() -> bool:
         _yandex_lock.release()
 
 
+def run_yandex_queries_sync_blocking() -> bool:
+    """Обновляет только поисковые запросы Директа, не пересчитывая источники."""
+    if not _yandex_lock.acquire(blocking=False):
+        logger.info("Синхронизация Яндекса уже выполняется — повторный запуск пропущен")
+        return False
+    try:
+        return asyncio.run(_yandex_queries_sync_job())
+    finally:
+        _yandex_lock.release()
+
+
+async def _yandex_queries_sync_job() -> bool:
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def report(**patch: Any) -> None:
+        async with session_factory() as session:
+            await cfg.merge_yandex_sync_status(session, patch)
+
+    try:
+        async with session_factory() as session:
+            previous = await cfg.get_yandex_sync_status(session)
+        previous_sources = previous.get("sources") or {}
+        await report(
+            state="running",
+            step="Повторная загрузка только поисковых запросов…",
+            started_at=_now(),
+            finished_at=None,
+            error=None,
+            sources=previous_sources,
+            stats={},
+        )
+
+        async def progress(step: str) -> None:
+            await report(step=step)
+
+        async with session_factory() as session:
+            await cfg.apply_overrides_from_db(session)
+            if settings.data_source != "real":
+                result = {
+                    "sources": {"yandex": {"status": "skipped"}},
+                    "stats": {"reason": "Включён режим демонстрационных данных"},
+                }
+            else:
+                from app.services.yandex_sync import sync_yandex_search_queries
+                result = await sync_yandex_search_queries(session, progress=progress)
+        merged_sources = {**previous_sources, **result.get("sources", {})}
+        await report(
+            state="done",
+            step="Поисковые запросы обновлены",
+            finished_at=_now(),
+            sources=merged_sources,
+            stats=result.get("stats", {}),
+        )
+        logger.info("Поисковые запросы Яндекса обновлены: %s", result.get("stats"))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Синхронизация поисковых запросов Яндекса упала")
+        try:
+            await report(state="error", step="Ошибка", finished_at=_now(), error=str(exc))
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+    finally:
+        await engine.dispose()
+
+
 async def _yandex_sync_job() -> bool:
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)

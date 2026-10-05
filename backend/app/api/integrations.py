@@ -430,6 +430,37 @@ async def start_yandex_sync(
     return await cfg.get_yandex_sync_status(session)
 
 
+@router.post("/yandex/sync/search-queries")
+async def start_yandex_search_queries_sync(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Повторяет только отчёты поисковых запросов без расходов, Метрики и CRM."""
+    current = await cfg.get_yandex_sync_status(session)
+    if current.get("state") == "running" and not _is_stale(current.get("started_at")):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Обновление данных Яндекса уже выполняется.",
+        )
+    config = await cfg.get_yandex_config(session, masked=False)
+    if not config.get("direct_accounts"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Сначала добавьте аккаунт Яндекс Директа.",
+        )
+    await cfg.merge_yandex_sync_status(session, {
+        "state": "running",
+        "step": "Повторная загрузка только поисковых запросов…",
+        "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "finished_at": None,
+        "error": None,
+        "stats": {},
+    })
+    threading.Thread(
+        target=maintenance.run_yandex_queries_sync_blocking, daemon=True
+    ).start()
+    return await cfg.get_yandex_sync_status(session)
+
+
 @router.get("/yandex/sync/status")
 async def yandex_sync_status(
     session: AsyncSession = Depends(get_session),

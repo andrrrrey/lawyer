@@ -19,6 +19,7 @@ import {
   useRecomputeStatus,
   useSaveIntegrations,
   useStartRecompute,
+  useStartYandexSearchQueriesSync,
   useStartYandexSync,
   useYandexSyncStatus,
 } from "@/api/integrations";
@@ -151,6 +152,7 @@ export default function IntegrationsPage() {
   const startRecompute = useStartRecompute();
   const recomputeStatus = useRecomputeStatus();
   const startYandexSync = useStartYandexSync();
+  const startYandexSearchQueriesSync = useStartYandexSearchQueriesSync();
   const yandexSyncStatus = useYandexSyncStatus();
   const generateAi = useGenerateAi();
   const qc = useQueryClient();
@@ -198,13 +200,23 @@ export default function IntegrationsPage() {
         for (const key of ["dashboard", "analytics", "romi", "ai"]) {
           qc.invalidateQueries({ queryKey: [key] });
         }
-        message.success("Данные Яндекс.Директа и Метрики обновлены");
+        message.success(
+          yandexSyncStatus.data?.stats?.search_query_rows !== undefined
+            ? "Поисковые запросы Яндекс.Директа обновлены"
+            : "Данные Яндекс.Директа и Метрики обновлены",
+        );
       } else if (st === "error") {
         message.error(`Обновление Яндекса: ${yandexSyncStatus.data?.error ?? "ошибка"}`);
       }
     }
     prevYandexState.current = st;
-  }, [yandexSyncStatus.data?.state, yandexSyncStatus.data?.error, qc, message]);
+  }, [
+    yandexSyncStatus.data?.state,
+    yandexSyncStatus.data?.error,
+    yandexSyncStatus.data?.stats?.search_query_rows,
+    qc,
+    message,
+  ]);
 
   const cfg = q.data;
 
@@ -297,6 +309,15 @@ export default function IntegrationsPage() {
     }
   };
 
+  const onYandexSearchQueriesSync = async () => {
+    try {
+      await startYandexSearchQueriesSync.mutateAsync();
+      await yandexSyncStatus.refetch();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
   const onGenerateAi = async () => {
     try {
       const res = await generateAi.mutateAsync();
@@ -367,14 +388,23 @@ export default function IntegrationsPage() {
                   </div>
                 ) : null}
               </div>
-              <Button
-                type="primary"
-                onClick={onYandexSync}
-                loading={startYandexSync.isPending || yandexSyncStatus.data?.state === "running"}
-                disabled={yandexSyncStatus.data?.state === "running" || cfg.data_source !== "real"}
-              >
-                Обновить Яндекс
-              </Button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <Button
+                  type="primary"
+                  onClick={onYandexSync}
+                  loading={startYandexSync.isPending || yandexSyncStatus.data?.state === "running"}
+                  disabled={yandexSyncStatus.data?.state === "running" || cfg.data_source !== "real"}
+                >
+                  Обновить Яндекс
+                </Button>
+                <Button
+                  onClick={onYandexSearchQueriesSync}
+                  loading={startYandexSearchQueriesSync.isPending}
+                  disabled={yandexSyncStatus.data?.state === "running" || cfg.data_source !== "real"}
+                >
+                  Только поисковые запросы
+                </Button>
+              </div>
             </div>
             <div className="intg-maint-row">
               <div className="st">

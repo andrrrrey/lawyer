@@ -85,6 +85,7 @@ async def sync_yandex(
     direct_updates: dict[str, list[dict]] = {}
     visit_updates: dict[str, list[dict]] = {}
     search_queries: list[dict] = []
+    search_query_success_keys: set[str] = set()
 
     for item in configured_direct:
         if item.get("credential_id") not in credentials:
@@ -124,6 +125,7 @@ async def sync_yandex(
                 for row in queries:
                     row["legal_entity_key"] = item.get("legal_entity_key") or ""
                 search_queries.extend(queries)
+                search_query_success_keys.add(key)
             except Exception as exc:  # noqa: BLE001
                 sources[source_key]["status"] = "partial"
                 sources[source_key]["message"] = f"Расходы загружены; поисковые запросы: {exc}"
@@ -247,7 +249,9 @@ async def sync_yandex(
     for key, value in baseline.items():
         session.add(Baseline(key=key, value=value))
 
-    if direct_updates:
+    # Не затираем прежний список частичным отчётом: минус-слова обновляются,
+    # только когда поисковые запросы получены по всем включённым кабинетам.
+    if configured_direct and len(search_query_success_keys) == len(configured_direct):
         await session.execute(delete(MinusWord))
         await session.execute(delete(BudgetRec))
         for index, item in enumerate(ingest.minus_word_candidates(search_queries)):
@@ -273,6 +277,86 @@ async def sync_yandex(
             "visit_rows": sum(len(rows) for rows in visit_updates.values()),
             "updated_resources": len(direct_updates) + len(visit_updates),
             "retained_failed_resources": errors,
+            "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        },
+    }
+
+
+async def sync_yandex_search_queries(
+    session: AsyncSession, progress: Progress | None = None
+) -> dict:
+    """Повторяет только отчёты поисковых запросов, не трогая расходы и Метрику."""
+    config = await integrations_config.get_yandex_config(session, masked=False)
+    credentials = {
+        item["id"]: item for item in config["credentials"]
+        if item.get("enabled", True) and item.get("token")
+    }
+    accounts = [
+        item for item in config["direct_accounts"] if item.get("enabled", True)
+    ]
+    sources: dict[str, dict] = {}
+    search_queries: list[dict] = []
+    succeeded = 0
+
+    for item in accounts:
+        key = _resource_key(item, "direct")
+        label = item.get("name") or item.get("client_login") or key
+        source_key = f"yandex_direct_{key}"
+        credential = credentials.get(item.get("credential_id"))
+        if credential is None:
+            sources[source_key] = {
+                "status": "error",
+                "message": "OAuth-токен не задан или доступ отключён.",
+                "label": label,
+                "retained_previous": True,
+            }
+            continue
+        await _progress(progress, f"Директ · {label}: только поисковые запросы…")
+        adapter = RealYandexDirectAdapter(
+            oauth_token=credential["token"],
+            direct_login=str(item.get("client_login") or ""),
+        )
+        try:
+            rows = adapter.fetch_search_queries()
+            search_queries.extend(rows)
+            succeeded += 1
+            sources[source_key] = {
+                "status": "ok", "count": len(rows), "label": label,
+            }
+        except Exception as exc:  # noqa: BLE001
+            sources[source_key] = {
+                "status": "error", "message": str(exc), "label": label,
+                "retained_previous": True,
+            }
+
+    replaced = bool(accounts) and succeeded == len(accounts)
+    candidates: list[dict] = []
+    if replaced:
+        candidates = ingest.minus_word_candidates(search_queries)
+        await session.execute(delete(MinusWord))
+        for index, item in enumerate(candidates):
+            session.add(MinusWord(
+                position=index,
+                phrase=str(item["phrase"]),
+                camp=str(item["camp"])[:128],
+                shows=item["shows"],
+                clicks=item["clicks"],
+                spend=item["spend"],
+                conv=0,
+                deals=0,
+                reason=str(item["reason"])[:96],
+                status="new",
+            ))
+        await session.commit()
+
+    return {
+        "mode": "real",
+        "sources": sources,
+        "stats": {
+            "search_query_rows": len(search_queries),
+            "minus_word_candidates": len(candidates),
+            "updated_accounts": succeeded,
+            "retained_previous": not replaced,
             "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
         },
     }

@@ -11,6 +11,7 @@ import {
   type ExpenseArticle,
   type Funnel,
   type Plan,
+  downloadOneCUnmatchedReport,
   useBitrixFunnels,
   useBitrixUsers,
   useBusinessSettings,
@@ -54,7 +55,10 @@ export default function BusinessSettingsPage() {
   const [articleModalOpen, setArticleModalOpen] = useState(false);
   const [editingArticle, setEditingArticle] = useState<ExpenseArticle | null>(null);
   const [newArticleName, setNewArticleName] = useState("");
-  const receipts = useOneCReceiptJournal();
+  const [receiptState, setReceiptState] = useState("all");
+  const [reportDownloading, setReportDownloading] = useState(false);
+  const [planMonth, setPlanMonth] = useState(dayjs().startOf("month"));
+  const receipts = useOneCReceiptJournal(receiptState);
   const expenses = useManualExpenses();
   const expenseEntityKey = expenseDraft.legal_entity_key || query.data?.legal_entities[0]?.key || "";
   const expenseArticles = useExpenseArticles(expenseEntityKey);
@@ -143,6 +147,46 @@ export default function BusinessSettingsPage() {
   const planSourceOptions = [...new Set([
     ...(dashboardFilters.data?.sources ?? []), ...savedPlanSources,
   ])].map((value) => ({ value, label: value }));
+  const selectedPlanMonth = planMonth.format("YYYY-MM");
+  const previousPlanMonth = planMonth.subtract(1, "month").format("YYYY-MM");
+  const visiblePlans = draft.plans
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.period === selectedPlanMonth);
+
+  const addPlanForSelectedMonth = () => mutate((next) => {
+    const entity = next.legal_entities[0]?.key ?? "";
+    next.plans.push({
+      key: uid("plan"), scope_type: "company", scope_key: entity,
+      legal_entity_key: entity, period: selectedPlanMonth,
+      funnel: "", lead_source: "",
+      revenue: 0, sales_amount: 0, payments: 0, deals: 0, calls: 0, meetings: 0,
+    });
+  });
+
+  const copyPreviousMonthPlans = () => {
+    const source = draft.plans.filter((plan) => plan.period === previousPlanMonth);
+    if (!source.length) {
+      message.warning("В предыдущем месяце нет планов для копирования");
+      return;
+    }
+    const identity = (plan: Plan) => [
+      plan.legal_entity_key, plan.scope_type, plan.scope_key, plan.funnel, plan.lead_source,
+    ].join("|");
+    const existing = new Set(
+      draft.plans.filter((plan) => plan.period === selectedPlanMonth).map(identity),
+    );
+    const rows = source.filter((plan) => !existing.has(identity(plan)));
+    if (!rows.length) {
+      message.info("Все планы предыдущего месяца уже скопированы");
+      return;
+    }
+    mutate((next) => {
+      next.plans.push(...rows.map((plan) => ({
+        ...structuredClone(plan), key: uid("plan"), period: selectedPlanMonth,
+      })));
+    });
+    message.success(`Скопировано планов: ${rows.length}`);
+  };
   const savedExpenseSources = (expenses.data ?? [])
     .map((expense) => expense.channel)
     .filter(Boolean);
@@ -414,16 +458,65 @@ export default function BusinessSettingsPage() {
     {
       key: "onec", label: "Журнал 1С", children: (
         <Card title="Поступления 1С" subtitle="включённые, исключённые и несопоставленные операции">
-          <Table rowKey="id" loading={receipts.isLoading} dataSource={receipts.data ?? []} pagination={{ pageSize: 25 }} columns={[
-            { title: "Дата", dataIndex: "date", render: (value: string | null) => value ? new Date(value).toLocaleDateString("ru-RU") : "—" },
-            { title: "№", dataIndex: "number" },
-            { title: "Юрлицо", dataIndex: "legal_entity_key", render: (value: string) => draft.legal_entities.find((x) => x.key === value)?.name ?? "Не определено" },
-            { title: "Контрагент", dataIndex: "counterparty" },
-            { title: "Статья ДДС", dataIndex: "article" },
-            { title: "Сумма", dataIndex: "amount", render: (value: number) => `${value.toLocaleString("ru-RU")} ₽` },
-            { title: "Код BTX", dataIndex: "crm_external_id" },
-            { title: "Статус", render: (_, row) => row.excluded ? <Tag color="red">Исключено: {row.reason}</Tag> : row.matched ? <Tag color="green">Сопоставлено</Tag> : <Tag color="orange">Не сопоставлено</Tag> },
-          ]} />
+          <div className="setrow" style={{ justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: 0 }}>
+            <Select
+              style={{ width: 230 }}
+              value={receiptState}
+              options={[
+                { value: "all", label: "Все операции" },
+                { value: "included", label: "Сопоставленные" },
+                { value: "unmatched", label: "Несопоставленные" },
+                { value: "excluded", label: "Исключённые" },
+              ]}
+              onChange={setReceiptState}
+            />
+            <Button
+              loading={reportDownloading}
+              onClick={async () => {
+                setReportDownloading(true);
+                try {
+                  await downloadOneCUnmatchedReport();
+                  message.success("Отчёт для интегратора 1С сформирован");
+                } catch (error) {
+                  message.error((error as Error).message);
+                } finally {
+                  setReportDownloading(false);
+                }
+              }}
+            >
+              Скачать отчёт по несопоставленным
+            </Button>
+          </div>
+          <div style={{ minWidth: 0, overflow: "hidden" }}>
+            <Table
+              rowKey="id"
+              size="small"
+              tableLayout="fixed"
+              scroll={{ x: 1420 }}
+              loading={receipts.isLoading}
+              dataSource={receipts.data ?? []}
+              pagination={{ pageSize: 25, showSizeChanger: false }}
+              columns={[
+                { title: "Дата", dataIndex: "date", width: 105, render: (value: string | null) => value ? new Date(value).toLocaleDateString("ru-RU") : "—" },
+                { title: "№", dataIndex: "number", width: 110, ellipsis: true },
+                { title: "Юрлицо", dataIndex: "legal_entity_key", width: 120, ellipsis: true, render: (value: string) => draft.legal_entities.find((x) => x.key === value)?.name ?? "Не определено" },
+                { title: "Контрагент", dataIndex: "counterparty", width: 230, ellipsis: true },
+                { title: "Статья ДДС", dataIndex: "article", width: 220, ellipsis: true },
+                { title: "Сумма", dataIndex: "amount", width: 125, render: (value: number) => `${value.toLocaleString("ru-RU")} ₽` },
+                { title: "Код BTX", dataIndex: "crm_external_id", width: 110, ellipsis: true, render: (value: string) => value || "—" },
+                {
+                  title: "Статус", width: 400,
+                  render: (_, row) => (
+                    <div style={{ whiteSpace: "normal" }}>
+                      {row.excluded ? <Tag color="red">Исключено</Tag> : row.matched ? <Tag color="green">Сопоставлено</Tag> : <Tag color="orange">Не сопоставлено</Tag>}
+                      <div className="sub" style={{ marginTop: 4 }}>{row.match_reason || row.reason}</div>
+                      {row.deal_status ? <div className="sub">Bitrix24: {row.deal_status}</div> : null}
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </div>
         </Card>
       ),
     },
@@ -602,7 +695,32 @@ export default function BusinessSettingsPage() {
             <Button disabled={!bitrixPeople.size} onClick={() => mutate((x) => x.employees.push({ key: uid("employee"), name: "", crm_source: "", bitrix_user_id: "", legal_entity_key: "", department_key: "", enabled: true }))}>Добавить сотрудника</Button>
           </Card>
           <Card title="Планы" subtitle="по компании, отделу или сотруднику; при необходимости — по воронке и источнику">
-            {draft.plans.map((row, index) => (
+            <div className="setrow" style={{ gap: 10, flexWrap: "wrap", paddingTop: 0 }}>
+              <div className="field">
+                <label>Месяц планирования</label>
+                <DatePicker
+                  picker="month"
+                  format="MMMM YYYY"
+                  allowClear={false}
+                  value={planMonth}
+                  onChange={(value) => value && setPlanMonth(value.startOf("month"))}
+                />
+              </div>
+              <Button onClick={copyPreviousMonthPlans}>
+                Скопировать из {planMonth.subtract(1, "month").format("MM.YYYY")}
+              </Button>
+              <span className="sub">Планы прошлых месяцев сохраняются и не изменяются.</span>
+            </div>
+            {!visiblePlans.length ? (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={`На ${planMonth.format("MM.YYYY")} планы ещё не заданы`}
+                description="Добавьте новый план или скопируйте структуру и показатели предыдущего месяца."
+              />
+            ) : null}
+            {visiblePlans.map(({ row, index }) => (
               <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}>
                 <Select
                   style={{ width: 145 }}
@@ -661,14 +779,6 @@ export default function BusinessSettingsPage() {
                   value={row.lead_source || undefined}
                   onChange={(value) => mutate((x) => { x.plans[index].lead_source = value ?? ""; })}
                 />
-                <DatePicker
-                  picker="month"
-                  format="MM.YYYY"
-                  value={dayjs(`${row.period}-01`)}
-                  onChange={(value) => {
-                    if (value) mutate((x) => { x.plans[index].period = value.format("YYYY-MM"); });
-                  }}
-                />
                 <InputNumber addonBefore="Выручка, ₽" min={0} value={row.revenue} onChange={(v) => mutate((x) => { x.plans[index].revenue = v ?? 0; })} />
                 <InputNumber addonBefore="Сумма успешных сделок, ₽" min={0} value={row.sales_amount} onChange={(v) => mutate((x) => { x.plans[index].sales_amount = v ?? 0; })} />
                 <InputNumber addonBefore="Поступления из 1С, шт." min={0} value={row.payments} onChange={(v) => mutate((x) => { x.plans[index].payments = v ?? 0; })} />
@@ -678,15 +788,9 @@ export default function BusinessSettingsPage() {
                 <Button danger onClick={() => mutate((x) => x.plans.splice(index, 1))}>Удалить</Button>
               </div>
             ))}
-            <Button disabled={!draft.legal_entities.length} onClick={() => mutate((x) => {
-              const entity = x.legal_entities[0]?.key ?? "";
-              x.plans.push({
-                key: uid("plan"), scope_type: "company", scope_key: entity,
-                legal_entity_key: entity, period: new Date().toISOString().slice(0, 7),
-                funnel: "", lead_source: "",
-                revenue: 0, sales_amount: 0, payments: 0, deals: 0, calls: 0, meetings: 0,
-              });
-            })}>Добавить план</Button>
+            <Button disabled={!draft.legal_entities.length} onClick={addPlanForSelectedMonth}>
+              Добавить план на {planMonth.format("MM.YYYY")}
+            </Button>
           </Card>
         </>
       ),

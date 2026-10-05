@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import io
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 
@@ -23,6 +23,7 @@ REPORTS_URL = "https://api.direct.yandex.com/json/v5/reports"
 # Сколько ждать офлайн-генерацию отчёта (сек). Тяжёлые отчёты (поисковые запросы)
 # ставятся в очередь и готовятся дольше, чем отчёт по кампаниям.
 _REPORT_DEADLINE = 150
+_SEARCH_QUERY_CHUNK_DAYS = 21
 
 
 def _window() -> tuple[str, str]:
@@ -33,6 +34,21 @@ def _window() -> tuple[str, str]:
     """
     today = datetime.now(UTC).date()
     return (today - timedelta(days=WINDOW_DAYS)).isoformat(), today.isoformat()
+
+
+def _chunks(date_from: str, date_to: str, days: int) -> list[tuple[str, str]]:
+    """Делит тяжёлый отчёт на небольшие включительные интервалы.
+
+    Reports API заметно быстрее формирует несколько коротких отчётов по
+    поисковым запросам, чем один отчёт за всё 95-дневное окно.
+    """
+    start, finish = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    result: list[tuple[str, str]] = []
+    while start <= finish:
+        end = min(start + timedelta(days=max(days, 1) - 1), finish)
+        result.append((start.isoformat(), end.isoformat()))
+        start = end + timedelta(days=1)
+    return result
 
 
 def parse_tsv(text: str, fields: list[str]) -> list[dict]:
@@ -164,18 +180,23 @@ class RealYandexDirectAdapter:
             "Date", "Query", "CampaignName", "Impressions", "Cost", "Clicks",
             "Conversions",
         ]
-        date_from, date_to = _window()
-        body = {"params": {
-            "SelectionCriteria": {"DateFrom": date_from, "DateTo": date_to},
-            "FieldNames": fields,
-            "ReportName": f"queries_{int(time.time())}",
-            "ReportType": "SEARCH_QUERY_PERFORMANCE_REPORT",
-            "DateRangeType": "CUSTOM_DATE",
-            "Format": "TSV",
-            "IncludeVAT": "YES",
-            "IncludeDiscount": "NO",
-        }}
-        rows = self._report(body, fields)
+        window_from, window_to = _window()
+        rows: list[dict] = []
+        stamp = int(time.time())
+        for part, (date_from, date_to) in enumerate(
+            _chunks(window_from, window_to, _SEARCH_QUERY_CHUNK_DAYS)
+        ):
+            body = {"params": {
+                "SelectionCriteria": {"DateFrom": date_from, "DateTo": date_to},
+                "FieldNames": fields,
+                "ReportName": f"queries_{stamp}_{part}_{date_from}_{date_to}",
+                "ReportType": "SEARCH_QUERY_PERFORMANCE_REPORT",
+                "DateRangeType": "CUSTOM_DATE",
+                "Format": "TSV",
+                "IncludeVAT": "YES",
+                "IncludeDiscount": "NO",
+            }}
+            rows.extend(self._report(body, fields))
         return [{
             "date": r.get("Date") or None,
             "phrase": r.get("Query", ""),

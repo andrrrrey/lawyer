@@ -14,6 +14,14 @@ def test_direct_parse_tsv() -> None:
     assert rows == [{"CampaignName": "Поиск · Бренд", "Cost": "38000", "Clicks": "120", "Impressions": "4300"}]
 
 
+def test_direct_search_query_window_is_split_into_small_reports() -> None:
+    chunks = yandex_direct._chunks("2026-07-01", "2026-10-04", 21)
+
+    assert chunks[0] == ("2026-07-01", "2026-07-21")
+    assert chunks[-1] == ("2026-09-23", "2026-10-04")
+    assert len(chunks) == 5
+
+
 def test_bitrix_normalize_deal() -> None:
     raw = {"ID": 3390, "TITLE": "ООО «ТеплоДом»", "STAGE_ID": "C1:PREPARATION",
            "OPPORTUNITY": "145000", "ASSIGNED_BY_ID": "12", "SOURCE_ID": "CALL",
