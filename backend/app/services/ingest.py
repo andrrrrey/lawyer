@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -409,14 +409,24 @@ def minus_word_candidates(search_queries: list[dict]) -> list[dict]:
     """Кандидаты в минус-слова: поисковые запросы с расходом и без конверсий.
 
     Это фразы, на которые тратится бюджет без результата — топ по расходу (без НДС)."""
-    grouped: dict[tuple[str, str], dict] = {}
+    scoped = any(str(row.get("legal_entity_key") or "") for row in search_queries)
+    grouped: dict[tuple[str, str, str], dict] = {}
     for q in search_queries:
         spend_net = round(romi.vat_to_net(q.get("spend", 0), q.get("date")))
-        key = (str(q.get("phrase") or ""), str(q.get("camp") or ""))
+        key = (
+            str(q.get("legal_entity_key") or ""), str(q.get("phrase") or ""),
+            str(q.get("camp") or ""),
+        )
         item = grouped.setdefault(key, {
-            "phrase": key[0], "camp": key[1], "shows": 0, "clicks": 0,
-            "spend": 0, "conv": 0,
+            "legal_entity_key": key[0], "phrase": key[1], "camp": key[2],
+            "shows": 0, "clicks": 0, "spend": 0, "conv": 0,
+            "date_from": None, "date_to": None,
         })
+        parsed_date = _parse_date(q.get("date"))
+        qdate = parsed_date.date() if parsed_date else None
+        if qdate:
+            item["date_from"] = min(filter(None, [item["date_from"], qdate]), default=qdate)
+            item["date_to"] = max(filter(None, [item["date_to"], qdate]), default=qdate)
         item["shows"] += int(q.get("shows") or 0)
         item["clicks"] += int(q.get("clicks") or 0)
         item["spend"] += spend_net
@@ -425,11 +435,17 @@ def minus_word_candidates(search_queries: list[dict]) -> list[dict]:
     for item in grouped.values():
         if item["spend"] <= 0 or item["conv"] > 0:
             continue
-        out.append({
+        result = {
             "phrase": item["phrase"], "camp": item["camp"],
             "shows": item["shows"], "clicks": item["clicks"],
             "spend": item["spend"], "reason": "Расход без конверсий",
-        })
+        }
+        if scoped:
+            result.update(
+                legal_entity_key=item["legal_entity_key"],
+                date_from=item["date_from"], date_to=item["date_to"],
+            )
+        out.append(result)
     out.sort(key=lambda x: x["spend"], reverse=True)
     return out[:_MINUS_WORD_LIMIT]
 
@@ -936,8 +952,6 @@ async def refresh_deals(
         return {"skipped": True, "reason": "Битрикс24 не настроен", "updated": 0, "created": 0}
 
     from app.services.integrations_config import get_field_map
-    extra_fields = (await get_field_map(session)).get("fields") or {}
-
     now = datetime.now(UTC)
     business_config = await business.get_settings(session)
     configured_pairs = set(business.configured_funnel_pairs(business_config))
@@ -949,6 +963,7 @@ async def refresh_deals(
         timespec="seconds"
     )
     for source_key, adapter in connections:
+        extra_fields = (await get_field_map(session, source_key)).get("fields") or {}
         raw: list[dict] = []
         if full:
             window = (now - timedelta(days=_DEALS_WINDOW_DAYS)).strftime(
@@ -1147,9 +1162,6 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
 
     # Сопоставление пользовательских полей Битрикс (со страницы «Интеграции»).
     from app.services.integrations_config import get_field_map
-    field_map = await get_field_map(session)
-    extra_fields = field_map.get("fields") or {}
-
     # 1. Сделки Битрикс24 (за окно дашборда — иначе выгружается вся история портала).
     bitrix_context: dict[str, tuple[dict, dict, dict, dict, set[str]]] = {}
     connections = factory.get_bitrix24_connections()
@@ -1160,11 +1172,12 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
         )
         deals = []
         for source_key, adapter in connections:
+            extra_fields = (await get_field_map(session, source_key)).get("fields") or {}
             source_deals = await _fetch_source(
                 sources,
                 f"bitrix_{source_key}",
                 f"Bitrix24 ({source_key})",
-                lambda adapter=adapter: adapter.fetch_deals(
+                lambda adapter=adapter, extra_fields=extra_fields: adapter.fetch_deals(
                     created_after=since, extra_fields=extra_fields
                 ),
                 progress,
@@ -1315,12 +1328,30 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
     baseline["clicks"] = float(sum(int(r.get("clicks") or 0) for r in direct_costs))
     baseline["visits"] = float(sum(int(v.get("visits") or 0) for v in metrika_visits))
     minus_words = minus_word_candidates(search_queries)
-    budget_recs = budget_recs_from_channels(channels)
+    entity_keys = {str(row.get("legal_entity_key") or "") for row in direct_costs}
+    budget_recs = []
+    for entity_key in entity_keys:
+        entity_channels = aggregate_channels(
+            [row for row in direct_costs if str(row.get("legal_entity_key") or "") == entity_key],
+            [row for row in deals if str(row.get("legal_entity_key") or "") == entity_key],
+            [row for row in receipts if str(row.get("legal_entity_key") or "") == entity_key],
+        )
+        for rec in budget_recs_from_channels(entity_channels):
+            rec["legal_entity_key"] = entity_key
+            budget_recs.append(rec)
 
     # 5. Запись (сделки + факты 1С + рекламные витрины + базлайны)
     # Сначала удаляем дочерние факты, чтобы FK не мешал обновить сделки.
-    await session.execute(delete(OneCReceipt))
-    await session.execute(delete(Deal))  # каскадно чистит задачи/историю этапов
+    # Обновляем только текущее окно источников. Более старая история остаётся в
+    # БД и продолжает обслуживать исторические периоды план-факта/аналитики.
+    history_cutoff = datetime.now(UTC) - timedelta(days=_DEALS_WINDOW_DAYS)
+    await session.execute(delete(OneCReceipt).where(or_(
+        OneCReceipt.registrar_date.is_(None),
+        OneCReceipt.registrar_date >= history_cutoff,
+    )))
+    await session.execute(delete(Deal).where(or_(
+        Deal.created_at.is_(None), Deal.created_at >= history_cutoff,
+    )))  # каскадно чистит задачи/историю только обновляемого окна
     await session.execute(delete(Campaign))
     await session.execute(delete(Channel))
     await session.execute(delete(AdCost))
@@ -1481,13 +1512,16 @@ async def ingest_all(session: AsyncSession, progress: Progress | None = None) ->
 
     for i, mw in enumerate(minus_words):
         session.add(MinusWord(
-            position=i, phrase=str(mw["phrase"]), camp=str(mw["camp"])[:128],
+            position=i, legal_entity_key=str(mw.get("legal_entity_key") or "")[:32],
+            date_from=mw.get("date_from"), date_to=mw.get("date_to"),
+            phrase=str(mw["phrase"]), camp=str(mw["camp"])[:128],
             shows=mw["shows"], clicks=mw["clicks"], spend=mw["spend"],
             conv=0, deals=0, reason=str(mw["reason"])[:96], status="new",
         ))
     for i, rec in enumerate(budget_recs):
         session.add(BudgetRec(
-            position=i, ic=rec["ic"], svg=rec["svg"], title=rec["title"],
+            position=i, legal_entity_key=str(rec.get("legal_entity_key") or "")[:32],
+            ic=rec["ic"], svg=rec["svg"], title=rec["title"],
             tag_label=rec["tag_label"], tag_class=rec["tag_class"], text=rec["text"],
             why=rec["why"], impact=rec["impact"], src=rec["src"],
             conf=rec["conf"], dep=rec["dep"],

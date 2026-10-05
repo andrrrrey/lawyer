@@ -71,7 +71,7 @@ export default function AiPage() {
         <div className="card">
           <EmptyState
             title="AI-инсайтов пока нет"
-            hint="Подключите AI-интеграцию (API-ключ и Base URL LLM) на странице «Интеграции» и нажмите «Сгенерировать AI-советы и отчёты»."
+            hint="Подключите AI-интеграцию (API-ключ и Base URL LLM) на странице «Интеграции» и нажмите «Сгенерировать AI-советы»."
           />
         </div>
       )}

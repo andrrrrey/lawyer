@@ -109,6 +109,7 @@ cd frontend && npm install && npm run build
 
 ## Документация
 
+- [docs/PROJECT_GUIDE_RU.md](docs/PROJECT_GUIDE_RU.md) — полная пользовательская и эксплуатационная инструкция: источники данных, расчёты, экраны и кнопки
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — развёртывание на VPS (домен, HTTPS)
 - [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — API-ключи: где взять и куда вносить
 - [docs/ADMIN.md](docs/ADMIN.md) — эксплуатация (бэкапы, логи, обновление)

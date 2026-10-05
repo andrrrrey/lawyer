@@ -213,23 +213,39 @@ async def get_leads(
     period: str = "30",
     legal_entity: list[str] = Query(default=[]),
     funnel: list[str] = Query(default=[]),
+    page: int | None = None,
+    page_size: int = 50,
     user: AuthUser = Depends(require_session),
     session: AsyncSession = Depends(get_session),
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | dict[str, Any]:
     mgr = await _scoped_manager(session, user, mgr)
+    filters = {
+        "mgr": mgr,
+        "source": source,
+        "risk": risk,
+        "period": period,
+        "legal_entity": _multi(legal_entity),
+        "funnel": _multi(funnel),
+    }
+    size = min(max(page_size, 10), 200)
+    current_page = max(page or 1, 1)
     rows = await metrics.leads(
-        session,
-        mgr=mgr,
-        source=source,
-        risk=risk,
-        period=period,
-        legal_entity=_multi(legal_entity),
-        funnel=_multi(funnel),
+        session, **filters,
+        offset=(current_page - 1) * size if page is not None else None,
+        limit=size if page is not None else None,
     )
     if user.role == "manager":
         for row in rows:
             row.update(amount=0, amount_display="Скрыто")
-    return rows
+    if page is None:
+        return rows
+    total = await metrics.leads_count(session, **filters)
+    return {
+        "items": rows,
+        "total": total,
+        "page": current_page,
+        "page_size": size,
+    }
 
 
 @router.get("/departments")
@@ -255,6 +271,7 @@ async def get_departments(
 async def get_plan_fact(
     month: str | None = None,
     source: str = "all",
+    mgr: list[str] = Query(default=[]),
     legal_entity: list[str] = Query(default=[]),
     funnel: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
@@ -266,6 +283,13 @@ async def get_plan_fact(
             session, selected_month, legal_entity=_multi(legal_entity),
             funnel=_multi(funnel), source=source,
         )
+        selected_managers = {value for value in mgr if value and value != "all"}
+        if selected_managers:
+            result = [
+                row for row in result
+                if row.get("scope_type") == "employee"
+                and row.get("scope_name") in selected_managers
+            ]
         if user.role == "manager":
             result = [
                 row for row in result

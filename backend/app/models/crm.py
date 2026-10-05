@@ -200,6 +200,23 @@ class Violation(Base):
     ai_comment: Mapped[str] = mapped_column(String, default="")
 
 
+class ReviewDecision(Base):
+    """Решение руководителя по оценочному нарушению, с аудитом автора и даты."""
+
+    __tablename__ = "review_decisions"
+    __table_args__ = (
+        UniqueConstraint("deal_key", "ptype", name="uq_review_decision_deal_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    deal_key: Mapped[str] = mapped_column(String(160))
+    ptype: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(24), default="justified")
+    comment: Mapped[str] = mapped_column(String, default="")
+    decided_by: Mapped[str] = mapped_column(String(128), default="")
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ManagerControl(Base):
     """Контроль обработки по менеджерам (MANAGERS_CTRL) — агрегаты регламента.
 

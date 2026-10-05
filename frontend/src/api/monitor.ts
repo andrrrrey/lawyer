@@ -109,3 +109,15 @@ export function useCreateTask() {
     },
   });
 }
+
+export function useReviewDecision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { deal_key: string; ptype: string; status: "justified" | "confirmed"; comment?: string }) =>
+      api.post("/monitor/review/decision", payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["monitor"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}

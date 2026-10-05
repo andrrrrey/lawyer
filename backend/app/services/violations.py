@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.models import Deal
 from app.services import business_settings, content, reglament
 from app.services.clock import reference_now
@@ -17,6 +18,11 @@ FilterValue = str | list[str]
 _CACHE_TTL_SECONDS = 30.0
 _evaluation_cache: dict[tuple, tuple[float, dict]] = {}
 _evaluation_locks: dict[tuple, asyncio.Lock] = {}
+
+
+def invalidate_cache() -> None:
+    """Сбрасывает витрину после изменения данных или настроек регламента."""
+    _evaluation_cache.clear()
 
 
 def _values(value: FilterValue) -> list[str]:
@@ -33,7 +39,13 @@ async def evaluate_current(
     funnel: FilterValue = "all",
 ) -> dict:
     """Кэширует одинаковый расчёт, который дашборд запрашивает несколькими блоками."""
+    if settings.data_source == "mock":
+        return await _evaluate_current_uncached(
+            session, mgr=mgr, source=source,
+            legal_entity=legal_entity, funnel=funnel,
+        )
     key = (
+        id(session.bind.sync_engine) if session.bind is not None else id(session),
         tuple(sorted(_values(mgr))),
         source or "all",
         tuple(sorted(_values(legal_entity))),
@@ -76,7 +88,7 @@ async def _evaluate_current_uncached(
     stmt = (
         select(Deal)
         .where(Deal.status_class != "st-ok")
-        .options(selectinload(Deal.tasks))
+        .options(selectinload(Deal.tasks), selectinload(Deal.activities))
         .order_by(Deal.position)
     )
     manager_values = _values(mgr)
@@ -100,21 +112,31 @@ async def _evaluate_current_uncached(
     deals = (await session.execute(stmt)).scalars().all()
     config = await content.regulation(session)
     business_config = await business_settings.get_settings(session)
+    deals = [
+        deal for deal in deals
+        if not business_settings.stage_is_successful(
+            business_config, deal.crm_source, deal.funnel_id, deal.stage,
+        )
+    ]
     # Сопоставление пользовательских полей Битрикс — только для движка (не в админку).
     from app.services.integrations_config import get_field_map
-    config = {**config, "field_map": await get_field_map(session)}
+    field_maps = {
+        source: await get_field_map(session, source)
+        for source in {deal.crm_source for deal in deals}
+    }
     grouped: dict[str, tuple[dict | None, list[Deal]]] = {}
     for deal in deals:
         profile = business_settings.sla_profile_for_funnel(
             business_config, deal.crm_source, deal.funnel_id
         )
-        key = str((profile or {}).get("key") or "legacy")
+        key = f"{deal.crm_source}:{(profile or {}).get('key') or 'legacy'}"
         grouped.setdefault(key, (profile, []))[1].append(deal)
     result = {"regular": [], "review": []}
     for profile, profile_deals in grouped.values():
+        source = profile_deals[0].crm_source
         evaluated = reglament.evaluate(
             profile_deals,
-            {**config, "sla_profile": profile or {}},
+            {**config, "sla_profile": profile or {}, "field_map": field_maps.get(source, {})},
             reference_now(),
         )
         result["regular"].extend(evaluated["regular"])

@@ -439,6 +439,10 @@ FIELD_MAP_TARGETS: list[dict] = [
      "hint": "Ориентир по срокам клиента."},
     {"key": "product", "label": "Товары / категории",
      "hint": "Интересующие товары или категории."},
+    {"key": "region", "label": "Регион",
+     "hint": "Регион клиента для контроля обязательного поля."},
+    {"key": "comment", "label": "Комментарий / итог диалога",
+     "hint": "Комментарий менеджера после звонка или встречи."},
     {"key": "cost", "label": "Себестоимость сделки",
      "hint": "Числовое поле себестоимости сделки — включает расчёт маржи "
              "(маржа = выручка − себестоимость по выигранным сделкам)."},
@@ -450,12 +454,26 @@ def _default_field_map() -> dict:
     return {"fields": {}, "required": []}
 
 
-async def get_field_map(session: AsyncSession) -> dict:
+async def get_field_map(session: AsyncSession, source: str | None = None) -> dict:
     """Текущее сопоставление полей: {'fields': {ключ: код Битрикс}, 'required': [ключи]}."""
     row = await _load_row(session)
     if row and isinstance(row.data, dict):
         fm = row.data.get(_FIELD_MAP_KEY)
         if isinstance(fm, dict):
+            if isinstance(fm.get("sources"), dict):
+                selected = (fm["sources"].get(source or "box") or {})
+                return {
+                    "fields": {
+                        k: v
+                        for k, v in (selected.get("fields") or {}).items()
+                        if k in _FIELD_MAP_KEYS and v
+                    },
+                    "required": [
+                        k
+                        for k in (selected.get("required") or [])
+                        if k in _FIELD_MAP_KEYS
+                    ],
+                }
             fields = {k: v for k, v in (fm.get("fields") or {}).items()
                       if k in _FIELD_MAP_KEYS and v}
             required = [k for k in (fm.get("required") or []) if k in _FIELD_MAP_KEYS]
@@ -463,14 +481,28 @@ async def get_field_map(session: AsyncSession) -> dict:
     return _default_field_map()
 
 
-async def save_field_map(session: AsyncSession, fields: dict, required: list) -> dict:
+async def save_field_map(
+    session: AsyncSession, fields: dict, required: list, source: str = "box",
+) -> dict:
     """Сохраняет сопоставление полей Битрикс (только известные семантические ключи)."""
     clean_fields = {k: str(v).strip() for k, v in (fields or {}).items()
                     if k in _FIELD_MAP_KEYS and str(v or "").strip()}
     clean_required = [k for k in (required or []) if k in _FIELD_MAP_KEYS]
     row = await _load_or_create_row(session)
     data = dict(row.data) if isinstance(row.data, dict) else {}
-    data[_FIELD_MAP_KEY] = {"fields": clean_fields, "required": clean_required}
+    old = data.get(_FIELD_MAP_KEY) if isinstance(data.get(_FIELD_MAP_KEY), dict) else {}
+    sources = dict(old.get("sources") or {})
+    if not sources and old.get("fields"):
+        # До разделения настроек по порталам одна карта применялась к обоим
+        # Bitrix24. При первой записи не теряем её для второго портала.
+        legacy = {
+            "fields": old.get("fields") or {},
+            "required": old.get("required") or [],
+        }
+        sources["box"] = dict(legacy)
+        sources["cloud"] = dict(legacy)
+    sources[source] = {"fields": clean_fields, "required": clean_required}
+    data[_FIELD_MAP_KEY] = {"sources": sources}
     row.data = data
     await session.commit()
     return {"fields": clean_fields, "required": clean_required}
@@ -554,6 +586,15 @@ async def load_data_source(session: AsyncSession) -> str:
     return settings.data_source
 
 
+async def bitrix_portal_base(session: AsyncSession, source: str) -> str:
+    """Публичная база портала без секретного пути входящего вебхука."""
+    overrides = await load_overrides(session)
+    key = "bitrix_cloud_webhook_url" if source == "cloud" else "bitrix_box_webhook_url"
+    url = _current_value(overrides, key).strip()
+    marker = "/rest/"
+    return url.split(marker, 1)[0].rstrip("/") if marker in url else ""
+
+
 def _current_value(overrides: dict[str, str], key: str) -> str:
     """Эффективное значение: оверрайд из БД, иначе — текущее из settings/env."""
     if key in overrides:
@@ -583,11 +624,8 @@ async def get_config(session: AsyncSession) -> dict:
 
     # Сохранённые результаты последних проверок (чтобы статус переживал перезагрузку).
     stored_checks = raw.get(_CHECKS_KEY) if isinstance(raw.get(_CHECKS_KEY), dict) else {}
-    fm = raw.get(_FIELD_MAP_KEY) if isinstance(raw.get(_FIELD_MAP_KEY), dict) else {}
-    field_map = {
-        "fields": {k: v for k, v in (fm.get("fields") or {}).items()
-                   if k in _FIELD_MAP_KEYS and v},
-        "required": [k for k in (fm.get("required") or []) if k in _FIELD_MAP_KEYS],
+    field_maps = {
+        source: await get_field_map(session, source) for source in ("box", "cloud")
     }
 
     providers_out: list[dict] = []
@@ -640,7 +678,8 @@ async def get_config(session: AsyncSession) -> dict:
         "ai_configured": ai_configured,
         "providers": providers_out,
         "yandex": await get_yandex_config(session),
-        "field_map": field_map,
+        "field_map": field_maps["box"],
+        "field_maps": field_maps,
         "field_targets": FIELD_MAP_TARGETS,
     }
 

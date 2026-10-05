@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -229,9 +229,11 @@ async def put_business_settings(
 @router.get("/one-c/receipts")
 async def get_one_c_receipts(
     state: str = "all",
-    limit: int = 200,
+    limit: int = 25,
+    offset: int = 0,
+    q: str = "",
     session: AsyncSession = Depends(get_session),
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Безопасный журнал сопоставления поступлений 1С без исходного raw JSON."""
     stmt = select(OneCReceipt)
     if state == "excluded":
@@ -244,9 +246,21 @@ async def get_one_c_receipts(
         stmt = stmt.where(
             OneCReceipt.excluded.is_(False), OneCReceipt.matched_deal_id.is_not(None)
         )
+    needle = q.strip()
+    if needle:
+        pattern = f"%{needle}%"
+        stmt = stmt.where(or_(
+            OneCReceipt.registrar_number.ilike(pattern),
+            OneCReceipt.counterparty_name.ilike(pattern),
+            OneCReceipt.article_name.ilike(pattern),
+            OneCReceipt.crm_external_id.ilike(pattern),
+        ))
+    count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+    total = int(await session.scalar(count_stmt) or 0)
     rows = (
         await session.execute(
-            stmt.order_by(OneCReceipt.registrar_date.desc()).limit(min(max(limit, 1), 1000))
+            stmt.order_by(OneCReceipt.registrar_date.desc(), OneCReceipt.id.desc())
+            .offset(max(offset, 0)).limit(min(max(limit, 1), 200))
         )
     ).scalars().all()
     external_ids = {row.crm_external_id for row in rows if row.crm_external_id}
@@ -257,7 +271,7 @@ async def get_one_c_receipts(
     for deal in candidate_rows:
         candidates.setdefault(str(deal.external_id), []).append(deal)
 
-    return [
+    items = [
         {
             "id": row.id,
             "date": row.registrar_date.isoformat() if row.registrar_date else None,
@@ -278,6 +292,7 @@ async def get_one_c_receipts(
         }
         for row in rows
     ]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 def _receipt_match_info(row: OneCReceipt, candidates: list[Deal]) -> dict[str, str]:

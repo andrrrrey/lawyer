@@ -442,7 +442,7 @@ export default function IntegrationsPage() {
             </div>
             <div className="intg-maint-row">
               <div className="st">
-                <b>Сгенерировать AI-советы и отчёты</b>
+                <b>Сгенерировать AI-советы</b>
                 <span>
                   {cfg.ai_configured
                     ? "Запускает генерацию инсайтов и рекомендаций по бюджету (раздел ROMI) через подключённую AI-интеграцию."
@@ -512,7 +512,7 @@ export default function IntegrationsPage() {
       </div>
 
       {/* Сопоставление пользовательских полей Битрикс24 */}
-      <FieldMapSection targets={cfg.field_targets} initial={cfg.field_map} />
+      <FieldMapSection targets={cfg.field_targets} initialMaps={cfg.field_maps ?? { box: cfg.field_map, cloud: cfg.field_map }} />
 
       {/* Нижняя панель действий */}
       <div className="intg-footer">

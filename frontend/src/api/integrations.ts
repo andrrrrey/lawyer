@@ -43,6 +43,7 @@ export interface IntegrationsConfig {
   providers: IntegrationProvider[];
   yandex: YandexConfig;
   field_map: FieldMap;
+  field_maps: Record<"box" | "cloud", FieldMap>;
   field_targets: FieldTarget[];
 }
 
@@ -246,9 +247,9 @@ export function useYandexSyncStatus() {
 }
 
 // Живая схема воронки Битрикс24 (поля сделки + стадии) — по кнопке.
-export function useBitrixSchema() {
+export function useBitrixSchema(source: "box" | "cloud") {
   return useMutation({
-    mutationFn: () => api.get<BitrixSchema>("/integrations/bitrix/schema"),
+    mutationFn: () => api.get<BitrixSchema>(`/integrations/bitrix/schema?source=${source}`),
   });
 }
 
@@ -267,12 +268,8 @@ export function useMoyskladSchema() {
 export function useSaveFieldMap() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (p: FieldMap) => api.put<FieldMap>("/integrations/field-map", p),
-    onSuccess: (data) => {
-      qc.setQueryData<IntegrationsConfig | undefined>(["integrations"], (prev) =>
-        prev ? { ...prev, field_map: data } : prev,
-      );
-    },
+    mutationFn: (p: FieldMap & { source: "box" | "cloud" }) => api.put<FieldMap>("/integrations/field-map", p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["integrations"] }),
   });
 }
 

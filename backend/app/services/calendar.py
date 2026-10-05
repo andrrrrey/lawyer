@@ -22,6 +22,15 @@ RF_HOLIDAYS_2026: set[date] = {
 }
 
 
+def _base_holidays(year: int) -> set[date]:
+    """Ежегодные федеральные праздники; переносы добавляются в настройках."""
+    return {
+        *(date(year, 1, day) for day in range(1, 9)),
+        date(year, 2, 23), date(year, 3, 8), date(year, 5, 1), date(year, 5, 9),
+        date(year, 6, 12), date(year, 11, 4),
+    }
+
+
 def _parse_hm(value: str) -> time:
     hh, mm = value.split(":")
     return time(int(hh), int(mm))
@@ -41,12 +50,23 @@ class WorkSchedule:
     def from_config(cls, schedule: dict | None) -> WorkSchedule:
         schedule = schedule or {}
         days_on = schedule.get("days_on") or [True, True, True, True, True, False, False]
+        configured: set[date] = set()
+        for value in schedule.get("holidays", []):
+            try:
+                configured.add(date.fromisoformat(str(value)))
+            except ValueError:
+                continue
+        years = range(date.today().year - 2, date.today().year + 4)
         return cls(
             days_on=list(days_on),
             work_from=_parse_hm(schedule.get("work_from", "09:00")),
             work_to=_parse_hm(schedule.get("work_to", "18:00")),
             use_calendar=bool(schedule.get("production_calendar", True)),
-            holidays=RF_HOLIDAYS_2026,
+            holidays=set().union(
+                *(_base_holidays(year) for year in years),
+                configured,
+                RF_HOLIDAYS_2026,
+            ),
         )
 
     def is_working_day(self, day: date) -> bool:

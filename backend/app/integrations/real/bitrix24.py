@@ -886,6 +886,9 @@ class RealBitrix24Adapter:
             # Привязка к сделке — задача видна в карточке сделки, вкладка «Задачи».
             "UF_CRM_TASK": [f"D_{deal_id}"],
         }
+        accomplices = [str(value) for value in payload.get("accomplice_ids", []) if str(value)]
+        if accomplices:
+            fields["ACCOMPLICES"] = accomplices
         if description:
             fields["DESCRIPTION"] = description
         if deadline:

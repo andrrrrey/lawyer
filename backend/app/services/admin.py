@@ -162,6 +162,8 @@ async def update_regulation(session: AsyncSession, new_data: dict, user: str) ->
             path=ch["path"], raw_from=ch["raw_from"], raw_to=ch["raw_to"],
         ))
     await session.commit()
+    from app.services import violations
+    violations.invalidate_cache()
     return {"config": new_data, "changes": len(changes)}
 
 
@@ -186,4 +188,6 @@ async def rollback(session: AsyncSession, history_id: int, user: str) -> dict:
         raw_from=entry.raw_to, raw_to=entry.raw_from,
     ))
     await session.commit()
+    from app.services import violations
+    violations.invalidate_cache()
     return {"config": data, "restored": entry.param}

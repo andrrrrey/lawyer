@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthUser, require_session
 from app.core.db import get_session
+from app.models import ReviewDecision
 from app.services import business_settings, monitor
 
 router = APIRouter(prefix="/monitor", tags=["monitor"], dependencies=[Depends(require_session)])
@@ -101,3 +103,30 @@ async def post_task(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Не удалось создать задачу в Битрикс24: {exc}",
         ) from exc
+
+
+@router.post("/review/decision")
+async def post_review_decision(
+    payload: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(require_session),
+) -> dict[str, Any]:
+    deal_key = str(payload.get("deal_key") or "").strip()
+    ptype = str(payload.get("ptype") or "").strip()
+    status_value = str(payload.get("status") or "justified").strip()
+    if not deal_key or not ptype or status_value not in {"justified", "confirmed"}:
+        raise HTTPException(status_code=422, detail="Некорректное решение по нарушению")
+    row = (await session.execute(select(ReviewDecision).where(
+        ReviewDecision.deal_key == deal_key, ReviewDecision.ptype == ptype,
+    ))).scalar_one_or_none()
+    if row is None:
+        row = ReviewDecision(deal_key=deal_key, ptype=ptype, decided_at=datetime.now(UTC))
+        session.add(row)
+    row.status = status_value
+    row.comment = str(payload.get("comment") or "").strip()
+    row.decided_by = user.login
+    row.decided_at = datetime.now(UTC)
+    await session.commit()
+    from app.services import violations as violation_service
+    violation_service.invalidate_cache()
+    return {"ok": True, "status": row.status, "decided_by": row.decided_by}

@@ -105,6 +105,10 @@ class Config:
     required_custom: list[tuple[str, str]]
     recontact_days: int
     require_planned_task: bool
+    stage_thresholds: dict[str, tuple[int, str]]
+    require_dialog_comment: bool
+    require_stage_match: bool
+    touch_chain: list[dict]
 
     @classmethod
     def parse(cls, data: dict) -> Config:
@@ -125,7 +129,9 @@ class Config:
             for rule in (data.get("sla_profile") or {}).get("rules", [])
             if rule.get("enabled", True)
         }
-        if "first_touch" in sla_rules:
+        # Порог из админ-панели является операционной настройкой и имеет
+        # приоритет над описательным значением профиля SLA.
+        if "Первый контакт" not in thresholds and "first_touch" in sla_rules:
             fc = sla_rules["first_touch"].get("minutes", fc)
         return cls(
             first_contact_min=int(fc),
@@ -142,6 +148,13 @@ class Config:
                 sla_rules.get("no_contact", {}).get("days", RECONTACT_DAYS)
             ),
             require_planned_task="planned_task" in sla_rules,
+            stage_thresholds={
+                name: (int(item.get("v") or 0), str(item.get("u") or "дн"))
+                for name, item in thresholds.items() if name != "Первый контакт"
+            },
+            require_dialog_comment="dialog_comment" in sla_rules,
+            require_stage_match="stage_matches_work" in sla_rules,
+            touch_chain=list(sla_rules.get("touch_chain", {}).get("schedule") or []),
         )
 
 
@@ -152,23 +165,33 @@ def _has_open_task(deal: Deal) -> bool:
 
 
 def _missing_fields(deal: Deal, req_fields: list[str]) -> list[str]:
+    custom = deal.custom or {}
     present = {
         "Телефон": bool(deal.phone),
         "Источник": bool(deal.src),
         "UTM-метки": bool(deal.utm),
         "Сумма сделки": deal.amount > 0,
         "Ответственный": bool(deal.mgr) and deal.mgr != "—",
-        "Товар / бренд": True,
-        "Регион": True,
-        "Комментарий": True,
+        "Товар / бренд": bool(custom.get("product")),
+        "Регион": bool(custom.get("region")),
+        "Комментарий": bool(custom.get("comment")),
     }
     return [_FIELD_SHORT.get(f, f) for f in req_fields if not present.get(f, True)]
 
 
-def _dup_value(deal: Deal, dup_key: str) -> str | None:
-    if "e-mail" in dup_key and "телефон" not in dup_key:
-        return deal.email
-    return deal.phone
+def _norm(value: str | None) -> str:
+    return "".join(str(value or "").strip().casefold().split())
+
+
+def _dup_values(deal: Deal, dup_key: str) -> list[str]:
+    phone, email, name = _norm(deal.phone), _norm(deal.email), _norm(deal.name)
+    if dup_key == "По телефону + имя":
+        return [f"phone-name:{phone}:{name}"] if phone and name else []
+    if dup_key == "По e-mail":
+        return [f"email:{email}"] if email else []
+    if dup_key == "По телефону или e-mail":
+        return ([f"phone:{phone}"] if phone else []) + ([f"email:{email}"] if email else [])
+    return [f"phone:{phone}"] if phone else []
 
 
 def _src_label(deal: Deal) -> str:
@@ -218,14 +241,13 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
     cfg = Config.parse(config_data)
     sched = cfg.schedule
 
-    # Карта телефонов для поиска дублей (первая встреченная сделка — эталон).
+    # Карта значений по выбранному правилу дублей (первая сделка — эталон).
     seen_key: dict[str, Deal] = {}
     for d in sorted(deals, key=lambda x: x.position):
         if is_terminal_stage(d.stage, d.status_class):
             continue
-        key = _dup_value(d, cfg.dup_key)
-        if key and key not in seen_key:
-            seen_key[key] = d
+        for key in _dup_values(d, cfg.dup_key):
+            seen_key.setdefault(key, d)
 
     regular: list[dict] = []
     review: list[dict] = []
@@ -281,19 +303,7 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
                 ))
                 continue
 
-        # 2. Зависшая сделка (нет движения по этапу дольше норматива)
-        if deal.stage_entered_at:
-            days = calendar_days(deal.stage_entered_at, now)
-            if days > cfg.stuck_days:
-                regular.append(_mk(
-                    deal, "stuck", over=True, sla=format_days(days),
-                    norm=f"без движения {days} дн · норматив {cfg.stuck_days}",
-                    amount=deal.amount,
-                    ai="Нет движения по этапу и повторных касаний. Высокий риск потери.",
-                ))
-                continue
-
-        # 3. Сделка без задачи на этапе, где задача обязательна
+        # 2. Сделка без задачи на этапе, где задача обязательна
         rule_name = STAGE_TASK_RULE.get(stage)
         task_required = cfg.require_planned_task or bool(
             rule_name and cfg.task_rules.get(rule_name)
@@ -308,6 +318,26 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
             ))
             continue
 
+        # 3. Зависшая сделка. Для этапов из админки применяется их собственный
+        # норматив; общий stuck_days остаётся резервом для остальных стадий.
+        if deal.stage_entered_at:
+            days = calendar_days(deal.stage_entered_at, now)
+            threshold = cfg.stage_thresholds.get(rule_name or "")
+            limit = threshold[0] if threshold else cfg.stuck_days
+            unit = threshold[1] if threshold else "дн"
+            elapsed_value = (
+                business_minutes(deal.stage_entered_at, now, sched) / max(sched.day_minutes(), 1)
+                if "р." in unit else days
+            )
+            if elapsed_value > limit:
+                regular.append(_mk(
+                    deal, "stuck", over=True, sla=format_days(days),
+                    norm=f"этап «{stage}» · норматив {limit} {unit}",
+                    amount=deal.amount,
+                    ai="Нет движения по этапу и повторных касаний. Высокий риск потери.",
+                ))
+                continue
+
         # 4. Лид без повторного касания
         if not is_new_stage(stage) and deal.first_contact_at and deal.last_activity_at:
             days = calendar_days(deal.last_activity_at, now)
@@ -320,13 +350,17 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
                 continue
 
         # 5. Возможный дубль
-        key = _dup_value(deal, cfg.dup_key)
-        if key and seen_key.get(key) is not deal:
-            other = seen_key[key]
+        duplicate = next(
+            (seen_key[key] for key in _dup_values(deal, cfg.dup_key)
+             if seen_key.get(key) is not None and seen_key[key] is not deal),
+            None,
+        )
+        if duplicate is not None:
+            other = duplicate
             regular.append(_mk(
                 deal, "dup", over=False, sla="—",
-                norm=f"совпадение телефона с {other.ref}", amount=0,
-                ai=f"Телефон совпадает с существующей сделкой ({other.ref}). "
+                norm=f"совпадение по правилу «{cfg.dup_key}» с {other.ref}", amount=0,
+                ai=f"Найдено совпадение с существующей сделкой ({other.ref}). "
                    "Проверьте объединение.",
             ))
             continue
@@ -343,5 +377,45 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
                 ai="Без обязательных полей сделка не попадёт в расчёт выручки и маржи.",
             ))
             continue
+
+        # 7. После состоявшегося диалога должен быть зафиксирован итог.
+        if cfg.require_dialog_comment and deal.call and not any(
+            (deal.custom or {}).get(key) for key in ("comment", "subject")
+        ):
+            regular.append(_mk(
+                deal, "fields", over=False, sla="—", norm="нет итога диалога",
+                amount=0, ai="После звонка или встречи не заполнен информативный комментарий.",
+            ))
+            continue
+
+        # 8. Денежная стадия без суммы — явное несоответствие стадии работе.
+        if cfg.require_stage_match and deal.invoice and deal.amount <= 0:
+            regular.append(_mk(
+                deal, "fields", over=False, sla="—", norm="денежная стадия без суммы",
+                amount=0, ai="Стадия предполагает договор/оплату, но сумма сделки не заполнена.",
+            ))
+            continue
+
+        # 9. Контроль графика звонков. Проверяем только поддерживаемые CRM-события;
+        # SMS не считаем звонком и не выдаём ложное нарушение без источника SMS.
+        if cfg.touch_chain and deal.created_at:
+            age = calendar_days(deal.created_at, now)
+            call_days = {
+                max(1, calendar_days(deal.created_at, activity.occurred_at) + 1)
+                for activity in deal.activities
+                if activity.kind == "call" and activity.occurred_at
+            }
+            missed = [
+                int(item.get("day") or 0) for item in cfg.touch_chain
+                if item.get("action") == "call" and 0 < int(item.get("day") or 0) <= age
+                and int(item.get("day") or 0) not in call_days
+            ]
+            if missed:
+                regular.append(_mk(
+                    deal, "no_recontact", over=False, sla=format_days(age),
+                    norm=f"нет звонка на {missed[0]}-й день", amount=deal.amount,
+                    ai="Нарушена настроенная цепочка повторных касаний.",
+                ))
+                continue
 
     return {"regular": regular, "review": review}

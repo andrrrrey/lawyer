@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, BigInteger, Boolean, Float, Integer, String, Text
+from datetime import date, datetime
+
+from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -75,6 +77,7 @@ class BudgetRec(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
     ic: Mapped[str] = mapped_column(String(24), default="")
     svg: Mapped[str] = mapped_column(String, default="")
     title: Mapped[str] = mapped_column(String(255))
@@ -86,6 +89,10 @@ class BudgetRec(Base):
     src: Mapped[list] = mapped_column(JSON, default=list)
     conf: Mapped[str] = mapped_column(String(24), default="")
     dep: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(16), default="new")
+    deferred_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acted_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    acted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class MinusWord(Base):
@@ -95,6 +102,9 @@ class MinusWord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
+    legal_entity_key: Mapped[str] = mapped_column(String(32), default="")
+    date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     phrase: Mapped[str] = mapped_column(Text)
     camp: Mapped[str] = mapped_column(String(128), default="")
     level: Mapped[str] = mapped_column(String(48), default="")

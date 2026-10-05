@@ -14,8 +14,8 @@ from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 from app.integrations import factory
-from app.models import Deal, Task
-from app.services import content, tasks_engine
+from app.models import Deal, ReviewDecision, Task
+from app.services import business_settings, content, tasks_engine
 from app.services import format as f
 from app.services import violations as vio
 
@@ -131,7 +131,14 @@ async def review(
     res = await vio.evaluate_current(
         session, mgr=mgr, legal_entity=legal_entity, funnel=funnel,
     )
-    result = _with_amount_display(res["review"])
+    decisions = (await session.execute(select(
+        ReviewDecision.deal_key, ReviewDecision.ptype,
+    ))).all()
+    decided = {(row.deal_key, row.ptype) for row in decisions}
+    result = _with_amount_display([
+        row for row in res["review"]
+        if (str(row.get("deal_key") or ""), str(row.get("ptype") or "")) not in decided
+    ])
     if hide_financial:
         for row in result:
             row.update(amount=0, amount_display="Скрыто")
@@ -172,7 +179,24 @@ async def create_task_for(
         raise ValueError("Сделка не найдена")
 
     config = await content.regulation(session)
-    params = tasks_engine.build_task(deal, config)
+    business_config = await business_settings.get_settings(session)
+    responsible_employee = next((
+        item for item in business_config.get("employees", [])
+        if item.get("enabled", True)
+        and str(item.get("crm_source") or "") == deal.crm_source
+        and str(item.get("bitrix_user_id") or "") == str(deal.mgr_id or "")
+    ), None)
+    department_key = str((responsible_employee or {}).get("department_key") or "")
+    head = next((
+        item for item in business_config.get("employees", [])
+        if item.get("enabled", True) and item.get("is_head")
+        and str(item.get("crm_source") or "") == deal.crm_source
+        and str(item.get("department_key") or "") == department_key
+    ), None)
+    params = tasks_engine.build_task(
+        deal, config, str((head or {}).get("bitrix_user_id") or "") or None,
+        str((head or {}).get("name") or "") or None,
+    )
 
     # Постановка в Битрикс24. Ошибка адаптера (нет ответственного, отказ портала,
     # сеть) пробрасывается наверх — локальную задачу при этом НЕ фиксируем, чтобы
@@ -181,7 +205,8 @@ async def create_task_for(
     result = await run_in_threadpool(adapter.create_task, {
         "deal_ref": deal.ref, "deal_external_id": deal.external_id,
         "title": params["title"], "assignee": params["assignee"],
-        "assignee_id": params["assignee_id"], "due_at": params["due_at"],
+        "assignee_id": params["assignee_id"], "accomplice_ids": params["accomplice_ids"],
+        "due_at": params["due_at"],
     })
     # Мок-адаптер в портал ничего не пишет. Демо-режим — штатный сценарий, но
     # выдавать его за созданную задачу нельзя: отдаём признак mock, и интерфейс
@@ -195,6 +220,7 @@ async def create_task_for(
         status="open", due_at=params["due_at"],
     ))
     await session.commit()
+    vio.invalidate_cache()
     return {
         "ok": True, "deal": deal.name, "ref": deal.ref,
         "assignee": assignee, "title": params["title"], "due": params["due_label"],

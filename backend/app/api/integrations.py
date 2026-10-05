@@ -38,6 +38,7 @@ class SaveRequest(BaseModel):
 
 
 class FieldMapRequest(BaseModel):
+    source: str = "box"
     fields: dict[str, str] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
 
@@ -86,7 +87,9 @@ async def put_field_map(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Сохраняет сопоставление пользовательских полей Битрикс24."""
-    return await cfg.save_field_map(session, payload.fields, payload.required)
+    if payload.source not in {"box", "cloud"}:
+        raise HTTPException(status_code=422, detail="Неизвестный источник Bitrix24")
+    return await cfg.save_field_map(session, payload.fields, payload.required, payload.source)
 
 
 @router.get("/bitrix/schema")

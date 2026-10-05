@@ -318,15 +318,26 @@ async def campaigns_bubble(
     return out
 
 
-async def minus_words(session: AsyncSession) -> dict:
-    rows = (await session.execute(
-        select(MinusWord).order_by(MinusWord.position)
-    )).scalars().all()
+async def minus_words(
+    session: AsyncSession, period: str = "30", legal_entity: str = "all",
+) -> dict:
+    from datetime import UTC, datetime
+
+    from app.services import period as period_service
+    stmt = select(MinusWord).order_by(MinusWord.position)
+    if legal_entity and legal_entity != "all":
+        stmt = stmt.where(MinusWord.legal_entity_key == legal_entity)
+    start = period_service.start(period, datetime.now(UTC)).date()
+    end_dt = period_service.end(period, datetime.now(UTC))
+    stmt = stmt.where((MinusWord.date_to.is_(None)) | (MinusWord.date_to >= start))
+    if end_dt is not None:
+        stmt = stmt.where((MinusWord.date_from.is_(None)) | (MinusWord.date_from < end_dt.date()))
+    rows = (await session.execute(stmt)).scalars().all()
     total_spend = sum(r.spend for r in rows)
     camps = len({r.camp for r in rows})
     items = [
         {
-            "phrase": r.phrase, "camp": r.camp, "level": r.level, "shows": r.shows,
+            "id": r.id, "phrase": r.phrase, "camp": r.camp, "level": r.level, "shows": r.shows,
             "clicks": r.clicks, "spend": r.spend, "spend_display": f.money(r.spend),
             "conv": r.conv, "deals": r.deals, "reason": r.reason, "conf": r.conf,
             "status": r.status,

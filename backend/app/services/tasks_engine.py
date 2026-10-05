@@ -32,16 +32,31 @@ def render_text(deal: Deal, template: str, due_label: str) -> str:
     )
 
 
-def build_task(deal: Deal, config: dict) -> dict:
+def build_task(
+    deal: Deal,
+    config: dict,
+    head_id: str | None = None,
+    head_name: str | None = None,
+) -> dict:
     """Готовит параметры задачи: адресат, текст, срок."""
     task_logic = config.get("task_logic", {})
     template = task_logic.get("template", "Свяжитесь по сделке {сделка} и обновите статус.")
     due_at = reference_now() + timedelta(days=1)
     due_label = due_at.strftime("%d.%m %H:%M")
+    mode = task_logic.get("assignee", "Ответственный по сделке")
+    assignee_id = head_id if mode == "Руководитель отдела продаж" and head_id else deal.mgr_id
+    accomplice_ids = (
+        [head_id] if mode == "Ответственный + руководитель" and head_id and head_id != deal.mgr_id
+        else []
+    )
     return {
-        "assignee": resolve_assignee(deal, task_logic),
-        # ID ответственного в Битрикс24 — задача ставится ответственному по сделке.
-        "assignee_id": deal.mgr_id,
+        "assignee": (
+            head_name
+            if mode == "Руководитель отдела продаж" and head_name
+            else resolve_assignee(deal, task_logic)
+        ),
+        "assignee_id": assignee_id,
+        "accomplice_ids": accomplice_ids,
         "deal_external_id": deal.external_id,
         "title": render_text(deal, template, due_label),
         "due_at": due_at,

@@ -1,9 +1,10 @@
-import { Spin } from "antd";
-import type { ReactNode } from "react";
+import { DatePicker, Spin } from "antd";
+import dayjs from "dayjs";
+import { type ReactNode, useEffect, useState } from "react";
 
 import {
   useAttention, useDepartments, useExpensesByArticle, useFunnel, useKpis, useLeads,
-  useManagers, usePlanFact, useRomiByChannel, useSources,
+  useManagers, usePlanFact, useRevenueSeries, useRomiByChannel, useSources,
 } from "@/api/dashboard";
 import { AttentionBlock } from "@/components/AttentionBlock";
 import { EChart } from "@/components/EChart";
@@ -14,7 +15,7 @@ import { LeadsTable } from "@/components/LeadsTable";
 import { ManagersTable } from "@/components/ManagersTable";
 import { PlanFactTable } from "@/components/PlanFactTable";
 import {
-  expensesBarOption, funnelOption, romiBarOption, sourcesBarOption,
+  expensesBarOption, funnelOption, revenueOption, romiBarOption, sourcesBarOption,
 } from "@/components/chartOptions";
 import { useFilters } from "@/state/filters";
 import { useMe } from "@/api/auth";
@@ -44,14 +45,18 @@ export default function DashboardPage() {
   const attention = useAttention(q);
   const funnel = useFunnel(q);
   const sources = useSources(q);
+  const revenueSeries = useRevenueSeries(q);
   const expenses = useExpensesByArticle(q, canViewFinancial);
   const romi = useRomiByChannel(q, canViewFinancial);
   const managers = useManagers(q);
   const departments = useDepartments(q);
-  const planFact = usePlanFact(new Date().toISOString().slice(0, 7), q);
+  const [planMonth, setPlanMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [leadPage, setLeadPage] = useState(1);
+  const planFact = usePlanFact(planMonth, q);
   const leads = useLeads(
-    f.mgr, f.source, f.leadFilter, f.period, f.legalEntity, f.funnel,
+    f.mgr, f.source, f.leadFilter, f.period, f.legalEntity, f.funnel, leadPage,
   );
+  useEffect(() => setLeadPage(1), [f.mgr, f.source, f.leadFilter, f.period, f.legalEntity, f.funnel]);
 
   return (
     <>
@@ -68,6 +73,9 @@ export default function DashboardPage() {
       </div>
 
       {canViewFinancial ? <div className="grid two-b" style={{ marginTop: 16 }}>
+        <ChartCard title="Динамика выручки" sub="фактические поступления 1С по дням">
+          {!revenueSeries.data ? <Spin /> : revenueSeries.data.days.length ? <EChart option={revenueOption(revenueSeries.data)} height={260} /> : <EmptyState title="Нет поступлений за период" />}
+        </ChartCard>
         <ChartCard title="Расходы по статьям" sub="Директ автоматически + ручной журнал">
           {!expenses.data ? <Spin /> : expenses.data.length ? (
             <EChart option={expensesBarOption(expenses.data)} height={260} />
@@ -98,12 +106,16 @@ export default function DashboardPage() {
       </div> : null}
 
       <div style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <DatePicker picker="month" allowClear={false} value={dayjs(`${planMonth}-01`)}
+            onChange={(value) => value && setPlanMonth(value.format("YYYY-MM"))} />
+        </div>
         {planFact.data?.length ? (
           <PlanFactTable rows={planFact.data} financial={canViewFinancial} />
         ) : planFact.data ? (
           <div className="card">
             <EmptyState
-              title="Планы на текущий месяц не заданы"
+              title={`Планы на ${dayjs(`${planMonth}-01`).format("MM.YYYY")} не заданы`}
               hint="Добавьте план компании, отдела или сотрудника в разделе «Настройки → Структура и планы»."
             />
           </div>
@@ -124,8 +136,8 @@ export default function DashboardPage() {
       </div> : null}
 
       <div style={{ marginTop: 16 }}>
-        {leads.data && leads.data.length ? (
-          <LeadsTable rows={leads.data} />
+        {leads.data && leads.data.items.length ? (
+          <LeadsTable rows={leads.data.items} total={leads.data.total} page={leadPage} onPage={setLeadPage} />
         ) : leads.data ? (
           <div className="card">
             <EmptyState

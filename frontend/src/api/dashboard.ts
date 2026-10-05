@@ -74,7 +74,9 @@ export interface Lead {
   fc: string; call: boolean; inv: boolean; pay: boolean; amount: number; amount_display: string;
   risk: string | null; tags: string[]; ai: string; ai_source: "baseline" | "llm"; reason: string;
   legal_entity_key: string;
+  crm_url?: string | null;
 }
+export interface LeadsPage { items: Lead[]; total: number; page: number; page_size: number }
 
 // Фильтры панели дашборда: период + менеджер + источник. Витрины принимают их
 // целиком — иначе выпадающие списки не влияли ни на что, кроме таблицы лидов.
@@ -96,6 +98,7 @@ const qs = (f: DashFilters) => {
   if (f.source && f.source !== "all") q.set("source", f.source);
   appendMany(q, "legal_entity", f.legalEntity);
   appendMany(q, "funnel", f.funnel);
+  appendMany(q, "mgr", f.mgr);
   return `?${q.toString()}`;
 };
 
@@ -173,7 +176,7 @@ export const usePlanFact = (month: string, f: DashFilters) => {
   appendMany(q, "funnel", f.funnel);
   if (f.source && f.source !== "all") q.set("source", f.source);
   return useQuery<PlanFactRow[]>({
-    queryKey: ["dashboard", "plan-fact", month, f.legalEntity, f.funnel, f.source],
+    queryKey: ["dashboard", "plan-fact", month, f.legalEntity, f.funnel, f.source, f.mgr],
     queryFn: () => api.get(`/dashboard/plan-fact?${q.toString()}`),
   });
 };
@@ -185,9 +188,10 @@ export const useLeads = (
   period: string,
   legalEntity: string[],
   funnel: string[],
+  page = 1,
 ) =>
-  useQuery<Lead[]>({
-    queryKey: ["dashboard", "leads", legalEntity, funnel, mgr, source, risk, period],
+  useQuery<LeadsPage>({
+    queryKey: ["dashboard", "leads", legalEntity, funnel, mgr, source, risk, period, page],
     queryFn: () => {
       const q = new URLSearchParams();
       appendMany(q, "mgr", mgr);
@@ -196,6 +200,8 @@ export const useLeads = (
       appendMany(q, "funnel", funnel);
       if (risk) q.set("risk", risk);
       if (period) q.set("period", period);
+      q.set("page", String(page));
+      q.set("page_size", "50");
       const qs = q.toString();
       return api.get(`/dashboard/leads${qs ? `?${qs}` : ""}`);
     },

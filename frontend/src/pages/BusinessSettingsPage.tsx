@@ -22,6 +22,7 @@ import {
   useManualExpenses,
   useOneCReceiptJournal,
   useRenameExpenseArticle,
+  useUpdateManualExpense,
   useSaveBusinessSettings,
 } from "@/api/businessSettings";
 import AdminPage from "@/pages/AdminPage";
@@ -53,18 +54,22 @@ export default function BusinessSettingsPage() {
     amount: 0, include_in_romi: false, channel: "", campaign: "", comment: "",
   });
   const [articleModalOpen, setArticleModalOpen] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null);
   const [editingArticle, setEditingArticle] = useState<ExpenseArticle | null>(null);
   const [newArticleName, setNewArticleName] = useState("");
   const [receiptState, setReceiptState] = useState("all");
+  const [receiptPage, setReceiptPage] = useState(1);
+  const [receiptSearch, setReceiptSearch] = useState("");
   const [reportDownloading, setReportDownloading] = useState(false);
   const [planMonth, setPlanMonth] = useState(dayjs().startOf("month"));
-  const receipts = useOneCReceiptJournal(receiptState);
+  const receipts = useOneCReceiptJournal(receiptState, receiptPage, receiptSearch);
   const expenses = useManualExpenses();
   const expenseEntityKey = expenseDraft.legal_entity_key || query.data?.legal_entities[0]?.key || "";
   const expenseArticles = useExpenseArticles(expenseEntityKey);
   const createExpenseArticle = useCreateExpenseArticle();
   const renameExpenseArticle = useRenameExpenseArticle();
   const createExpense = useCreateManualExpense();
+  const updateExpense = useUpdateManualExpense();
   const deleteExpense = useDeleteManualExpense();
 
   useEffect(() => { if (query.data) setDraft(structuredClone(query.data)); }, [query.data]);
@@ -203,11 +208,13 @@ export default function BusinessSettingsPage() {
       legal_entity_key: expenseDraft.legal_entity_key || draft.legal_entities[0]?.key || "",
     };
     try {
-      await createExpense.mutateAsync(payload);
+      if (editingExpenseId) await updateExpense.mutateAsync({ id: editingExpenseId, payload });
+      else await createExpense.mutateAsync(payload);
       setExpenseDraft((current) => ({
         ...current, article: "", amount: 0, channel: "", campaign: "", comment: "",
       }));
-      message.success("Расход добавлен");
+      message.success(editingExpenseId ? "Расход обновлён" : "Расход добавлен");
+      setEditingExpenseId(null);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Не удалось добавить расход");
     }
@@ -296,11 +303,20 @@ export default function BusinessSettingsPage() {
                 <Switch checked={entity.enabled} checkedChildren="Вкл." unCheckedChildren="Выкл." onChange={(v) => mutate((x) => { x.legal_entities[index].enabled = v; })} />
               </div>
               <div className="field" style={{ marginTop: 14 }}>
-                <label>Статьи ДДС по поступлениям — точное название, одна строка = одна статья</label>
-                <Input.TextArea rows={Math.max(5, entity.dds_articles.length + 1)} value={entity.dds_articles.map((a) => a.name).join("\n")} onChange={(e) => mutate((x) => {
-                  const old = new Map(x.legal_entities[index].dds_articles.map((a) => [a.name, a]));
-                  x.legal_entities[index].dds_articles = e.target.value.split("\n").filter((name) => name.trim()).map((name) => old.get(name) ?? ({ name, operation: "income", enabled: true, notes: "" } satisfies DdsArticle));
-                })} />
+                <label>Статьи ДДС по поступлениям и их влияние на выручку</label>
+                {entity.dds_articles.map((article, articleIndex) => (
+                  <div key={`${article.name}-${articleIndex}`} style={{ display: "grid", gridTemplateColumns: "1fr 180px auto auto", gap: 8, marginTop: 8 }}>
+                    <Input value={article.name} placeholder="Точное название из 1С" onChange={(e) => mutate((x) => { x.legal_entities[index].dds_articles[articleIndex].name = e.target.value; })} />
+                    <Select value={article.operation} options={[
+                      { value: "income", label: "Доход" },
+                      { value: "refund", label: "Возврат" },
+                      { value: "exclude", label: "Не учитывать" },
+                    ]} onChange={(value) => mutate((x) => { x.legal_entities[index].dds_articles[articleIndex].operation = value; })} />
+                    <Switch checked={article.enabled} checkedChildren="Вкл." unCheckedChildren="Выкл." onChange={(value) => mutate((x) => { x.legal_entities[index].dds_articles[articleIndex].enabled = value; })} />
+                    <Button danger onClick={() => mutate((x) => x.legal_entities[index].dds_articles.splice(articleIndex, 1))}>Удалить</Button>
+                  </div>
+                ))}
+                <Button style={{ marginTop: 10 }} onClick={() => mutate((x) => x.legal_entities[index].dds_articles.push({ name: "", operation: "income", enabled: true, notes: "" } satisfies DdsArticle))}>Добавить статью ДДС</Button>
               </div>
             </Card>
           ))}
@@ -468,8 +484,9 @@ export default function BusinessSettingsPage() {
                 { value: "unmatched", label: "Несопоставленные" },
                 { value: "excluded", label: "Исключённые" },
               ]}
-              onChange={setReceiptState}
+              onChange={(value) => { setReceiptState(value); setReceiptPage(1); }}
             />
+            <Input.Search allowClear placeholder="Документ, контрагент, статья или ID сделки" style={{ width: 360 }} onSearch={(value) => { setReceiptSearch(value.trim()); setReceiptPage(1); }} />
             <Button
               loading={reportDownloading}
               onClick={async () => {
@@ -494,8 +511,8 @@ export default function BusinessSettingsPage() {
               tableLayout="fixed"
               scroll={{ x: 1420 }}
               loading={receipts.isLoading}
-              dataSource={receipts.data ?? []}
-              pagination={{ pageSize: 25, showSizeChanger: false }}
+              dataSource={receipts.data?.items ?? []}
+              pagination={{ current: receiptPage, pageSize: 25, total: receipts.data?.total ?? 0, showSizeChanger: false, onChange: setReceiptPage }}
               columns={[
                 { title: "Дата", dataIndex: "date", width: 105, render: (value: string | null) => value ? new Date(value).toLocaleDateString("ru-RU") : "—" },
                 { title: "№", dataIndex: "number", width: 110, ellipsis: true },
@@ -584,7 +601,8 @@ export default function BusinessSettingsPage() {
               </div>
               <div className="field"><label>Кампания</label><Input disabled={!expenseDraft.include_in_romi} style={{ width: 180 }} placeholder="Необязательно" value={expenseDraft.campaign} onChange={(e) => setExpenseDraft((x) => ({ ...x, campaign: e.target.value }))} /></div>
               <div className="field"><label>Комментарий</label><Input style={{ width: 220 }} placeholder="Необязательно" value={expenseDraft.comment} onChange={(e) => setExpenseDraft((x) => ({ ...x, comment: e.target.value }))} /></div>
-              <Button type="primary" loading={createExpense.isPending} disabled={!expenseDraft.article.trim() || expenseDraft.amount <= 0 || (expenseDraft.include_in_romi && !expenseDraft.channel.trim())} onClick={addExpense}>Добавить</Button>
+              <Button type="primary" loading={createExpense.isPending || updateExpense.isPending} disabled={!expenseDraft.article.trim() || expenseDraft.amount <= 0 || (expenseDraft.include_in_romi && !expenseDraft.channel.trim())} onClick={addExpense}>{editingExpenseId ? "Сохранить" : "Добавить"}</Button>
+              {editingExpenseId ? <Button onClick={() => setEditingExpenseId(null)}>Отмена</Button> : null}
             </div>
           </Card>
           <Card title="Журнал расходов" subtitle="автоматические расходы Директа отображаются на дашборде, ручные — в этом журнале">
@@ -595,7 +613,7 @@ export default function BusinessSettingsPage() {
               { title: "Сумма", dataIndex: "amount", render: (value: number) => `${value.toLocaleString("ru-RU")} ₽` },
               { title: "ROMI", dataIndex: "include_in_romi", render: (value: boolean, row) => value ? <Tag color="purple">{row.channel}{row.campaign ? ` · ${row.campaign}` : ""}</Tag> : <Tag>Не учитывается</Tag> },
               { title: "Комментарий", dataIndex: "comment" },
-              { title: "", render: (_, row) => <Popconfirm title="Удалить расход?" okText="Удалить" cancelText="Отмена" onConfirm={() => deleteExpense.mutateAsync(row.id).then(() => message.success("Расход удалён")).catch((e: Error) => message.error(e.message))}><Button danger size="small">Удалить</Button></Popconfirm> },
+              { title: "", render: (_, row) => <div style={{ display: "flex", gap: 6 }}><Button size="small" onClick={() => { setEditingExpenseId(row.id); setExpenseDraft({ ...row }); }}>Изменить</Button><Popconfirm title="Удалить расход?" okText="Удалить" cancelText="Отмена" onConfirm={() => deleteExpense.mutateAsync(row.id).then(() => message.success("Расход удалён")).catch((e: Error) => message.error(e.message))}><Button danger size="small">Удалить</Button></Popconfirm></div> },
             ]} />
           </Card>
           <Modal
@@ -687,12 +705,13 @@ export default function BusinessSettingsPage() {
                   />
                   <Select style={{ width: 150 }} allowClear placeholder="Юрлицо" options={entityOptions} value={row.legal_entity_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].legal_entity_key = v ?? ""; })} />
                   <Select style={{ width: 200 }} allowClear placeholder="Отдел" options={departmentOptions} value={row.department_key || undefined} onChange={(v) => mutate((x) => { x.employees[index].department_key = v ?? ""; })} />
+                  <span style={{ whiteSpace: "nowrap" }}>Руководитель <Switch size="small" checked={Boolean(row.is_head)} onChange={(v) => mutate((x) => { x.employees[index].is_head = v; })} /></span>
                   <Switch checked={row.enabled} onChange={(v) => mutate((x) => { x.employees[index].enabled = v; })} />
                   <Button danger onClick={() => mutate((x) => x.employees.splice(index, 1))}>Удалить</Button>
                 </div>
               );
             })}
-            <Button disabled={!bitrixPeople.size} onClick={() => mutate((x) => x.employees.push({ key: uid("employee"), name: "", crm_source: "", bitrix_user_id: "", legal_entity_key: "", department_key: "", enabled: true }))}>Добавить сотрудника</Button>
+            <Button disabled={!bitrixPeople.size} onClick={() => mutate((x) => x.employees.push({ key: uid("employee"), name: "", crm_source: "", bitrix_user_id: "", legal_entity_key: "", department_key: "", is_head: false, enabled: true }))}>Добавить сотрудника</Button>
           </Card>
           <Card title="Планы" subtitle="по компании, отделу или сотруднику; при необходимости — по воронке и источнику">
             <div className="setrow" style={{ gap: 10, flexWrap: "wrap", paddingTop: 0 }}>

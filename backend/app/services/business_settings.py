@@ -6,7 +6,7 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BusinessSettings, Deal
@@ -52,6 +52,12 @@ async def save_settings(session: AsyncSession, data: dict[str, Any]) -> dict[str
                 .values(mgr=name)
             )
     await session.commit()
+    # SLA, этапы, обязательные поля и назначения сотрудников участвуют в
+    # вычислении нарушений. После сохранения интерфейс должен сразу видеть
+    # новые правила, а не ждать истечения кэша мониторинга.
+    from app.services import violations
+
+    violations.invalidate_cache()
     return deepcopy(normalized)
 
 
@@ -135,6 +141,7 @@ def validate_settings(data: dict[str, Any]) -> dict[str, Any]:
         employee_identities.add(identity)
         employee["bitrix_user_id"] = user_id
         employee["name"] = _required_text(employee.get("name"), "Имя сотрудника")
+        employee["is_head"] = bool(employee.get("is_head", False))
         entity_key = str(employee.get("legal_entity_key", ""))
         if entity_key and entity_key not in entity_keys:
             raise ValueError("Сотрудник ссылается на неизвестное юридическое лицо")
@@ -288,6 +295,68 @@ def stage_is_expected_payment(
                 if str(item).strip()
             }
     return False
+
+
+def _stage_in_funnel_field(
+    data: dict[str, Any], crm_source: str, funnel_id: str, stage: str | None, field: str,
+) -> bool:
+    needle = str(stage or "").strip().casefold()
+    if not needle:
+        return False
+    for funnel in data.get("funnels", []):
+        if (
+            funnel.get("enabled", True)
+            and str(funnel.get("crm_source")) == crm_source
+            and str(funnel.get("external_id")) == str(funnel_id)
+        ):
+            return needle in {
+                str(item).strip().casefold() for item in funnel.get(field, [])
+                if str(item).strip()
+            }
+    return False
+
+
+def stage_is_successful(
+    data: dict[str, Any], crm_source: str, funnel_id: str, stage: str | None,
+) -> bool:
+    return _stage_in_funnel_field(data, crm_source, funnel_id, stage, "successful_stages")
+
+
+def stage_is_qualified(
+    data: dict[str, Any], crm_source: str, funnel_id: str, stage: str | None,
+) -> bool:
+    return _stage_in_funnel_field(data, crm_source, funnel_id, stage, "qualification_stages")
+
+
+def qualification_stages_configured(
+    data: dict[str, Any], crm_source: str, funnel_id: str,
+) -> bool:
+    return any(
+        funnel.get("enabled", True)
+        and str(funnel.get("crm_source")) == crm_source
+        and str(funnel.get("external_id")) == str(funnel_id)
+        and bool(funnel.get("qualification_stages"))
+        for funnel in data.get("funnels", [])
+    )
+
+
+def successful_stage_condition(data: dict[str, Any]):
+    """SQL-условие: семантика Bitrix success ИЛИ явно настроенная стадия успеха."""
+    clauses = [Deal.status_class == "st-ok"]
+    for funnel in data.get("funnels", []):
+        stages = [
+            str(item).strip()
+            for item in funnel.get("successful_stages", [])
+            if str(item).strip()
+        ]
+        if not funnel.get("enabled", True) or not stages:
+            continue
+        clauses.append(and_(
+            Deal.crm_source == str(funnel.get("crm_source") or ""),
+            Deal.funnel_id == str(funnel.get("external_id") or ""),
+            func.lower(Deal.stage).in_([item.casefold() for item in stages]),
+        ))
+    return or_(*clauses)
 
 
 def sla_profile_for_funnel(

@@ -1,9 +1,10 @@
 import { App, Button, Spin } from "antd";
-import { useState } from "react";
 
 import {
-  type BudgetRec, useBudgetRecs, useCampaignsBubble, useMinusWords, useRomiChannels,
+  type BudgetRec, useBudgetRecAction, useBudgetRecs, useCampaignsBubble,
+  useMinusWordAction, useMinusWords, useRomiChannels,
 } from "@/api/romi";
+import { api } from "@/api/client";
 import { EChart } from "@/components/EChart";
 import { EmptyState } from "@/components/EmptyState";
 import { bubbleOption, romiSpendRevenueOption } from "@/components/chartOptions";
@@ -24,6 +25,11 @@ function SrcChips({ src }: { src: string[] }) {
 
 function RecCard({ r }: { r: BudgetRec }) {
   const { message } = App.useApp();
+  const action = useBudgetRecAction();
+  const update = (status: "accepted" | "deferred") => action.mutate({ id: r.id, status }, {
+    onSuccess: () => message.success(status === "accepted" ? "Рекомендация принята и сохранена" : "Рекомендация отложена на 7 дней"),
+    onError: (e) => message.error(e instanceof Error ? e.message : "Не удалось сохранить действие"),
+  });
   return (
     <div className="rec">
       <div className={`ric ${r.ic}`}>
@@ -40,8 +46,12 @@ function RecCard({ r }: { r: BudgetRec }) {
           {r.dep ? <span className="depchip" title="Требует настроенной связки сделка ↔ поступление">треб. связки с 1С</span> : null}
         </div>
         <div className="rec-act">
-          <Button type="primary" size="small" onClick={() => message.success("Рекомендация принята — сформирована задача")}>Принять</Button>
-          <Button size="small" onClick={() => message.success("Отложено")}>Отложить</Button>
+          <Button type="primary" size="small" loading={action.isPending} disabled={r.status === "accepted"} onClick={() => update("accepted")}>
+            {r.status === "accepted" ? "Принято" : "Принять"}
+          </Button>
+          <Button size="small" loading={action.isPending} disabled={r.status === "deferred"} onClick={() => update("deferred")}>
+            {r.status === "deferred" ? "Отложено" : "Отложить"}
+          </Button>
           <span className="impact tag t-blue">{r.impact}</span>
         </div>
       </div>
@@ -54,22 +64,25 @@ export default function RomiPage() {
   const legalEntity = filters.legalEntity[0] ?? "all";
   const romiCh = useRomiChannels(filters.period, legalEntity);
   const bubble = useCampaignsBubble(filters.period, legalEntity);
-  const recs = useBudgetRecs();
-  const mw = useMinusWords();
+  const recs = useBudgetRecs(filters.period, legalEntity);
+  const mw = useMinusWords(filters.period, legalEntity);
   const { message } = App.useApp();
-  const [statuses, setStatuses] = useState<Record<number, string>>({});
+  const minusAction = useMinusWordAction();
 
-  const cycle = (i: number, current: string) => {
+  const cycle = (id: number, current: string) => {
     const order = ["new", "accepted", "rejected"];
-    const cur = statuses[i] ?? current;
-    const next = cur === "exported" ? "new" : order[(order.indexOf(cur) + 1) % order.length];
-    setStatuses((p) => ({ ...p, [i]: next }));
+    const next = current === "exported" ? "new" : order[(order.indexOf(current) + 1) % order.length];
+    minusAction.mutate({ id, status: next }, {
+      onError: (e) => message.error(e instanceof Error ? e.message : "Не удалось сохранить статус"),
+    });
   };
 
   // Реальная выгрузка минус-слов: текстовый файл (по фразе на строку — формат,
   // который вставляется в «Минус-фразы» Яндекс Директа).
   const onDownloadMinus = () => {
-    const items = mw.data?.items ?? [];
+    const allItems = mw.data?.items ?? [];
+    const accepted = allItems.filter((item) => item.status === "accepted");
+    const items = accepted.length ? accepted : allItems.filter((item) => item.status === "new");
     if (!items.length) {
       message.info("Нет кандидатов в минус-слова — выполните пересчёт с подключённым Директом.");
       return;
@@ -84,6 +97,8 @@ export default function RomiPage() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    Promise.all(items.map((item) => api.patch(`/romi/minus-words/${item.id}`, { status: "exported" })))
+      .then(() => mw.refetch());
     message.success(`Скачано минус-слов: ${items.length}`);
   };
 
@@ -146,10 +161,10 @@ export default function RomiPage() {
               </tr>
             </thead>
             <tbody>
-              {mw.data?.items.slice(0, 10).map((w, i) => {
-                const st = statuses[i] ?? w.status;
+              {mw.data?.items.slice(0, 10).map((w) => {
+                const st = w.status;
                 return (
-                  <tr key={i}>
+                  <tr key={w.id}>
                     <td><span className="tag t-gray">{w.camp}</span></td>
                     <td style={{ fontWeight: 600 }}>{w.phrase}</td>
                     <td className="num">{w.spend_display}</td>
@@ -157,7 +172,7 @@ export default function RomiPage() {
                     <td className="num">{w.conv}</td>
                     <td><span className="mw-reason">{w.reason}</span></td>
                     <td><span className={`conf-dot ${w.conf === "высокая" ? "cf-hi" : "cf-mid"}`} />{w.conf}</td>
-                    <td><span className={`msbadge ${MS_STATUS[st][1]}`} onClick={() => cycle(i, w.status)} title="нажмите для смены статуса">{MS_STATUS[st][0]}</span></td>
+                    <td><span className={`msbadge ${MS_STATUS[st][1]}`} onClick={() => cycle(w.id, w.status)} title="нажмите для смены статуса">{MS_STATUS[st][0]}</span></td>
                   </tr>
                 );
               })}

@@ -1,3 +1,4 @@
+import { Pagination } from "antd";
 import type { Lead } from "@/api/dashboard";
 import { SparkleIcon } from "./icons";
 import { avatarColor, initials } from "./people";
@@ -33,7 +34,7 @@ function PriorityCell({ lead }: { lead: Lead }) {
   );
 }
 
-export function LeadsTable({ rows }: { rows: Lead[] }) {
+export function LeadsTable({ rows, total, page, onPage }: { rows: Lead[]; total: number; page: number; onPage: (page: number) => void }) {
   return (
     <div className="card" id="leads-table">
       <div className="card-h">
@@ -50,7 +51,9 @@ export function LeadsTable({ rows }: { rows: Lead[] }) {
           <tbody>
             {rows.length ? (
               rows.map((l, i) => (
-                <tr key={i} className={`click rk-row-${l.risk ?? "none"}`}>
+                <tr key={i} className={`click rk-row-${l.risk ?? "none"}`}
+                  title={l.crm_url ? "Открыть карточку в Bitrix24" : undefined}
+                  onClick={() => l.crm_url && window.open(l.crm_url, "_blank", "noopener,noreferrer")}>
                   <td className="cell-client" style={{ fontWeight: 600 }} title={l.name}>{l.name}</td>
                   <td><PriorityCell lead={l} /></td>
                   <td><span className="tag t-gray">{l.src}</span></td>
@@ -81,6 +84,7 @@ export function LeadsTable({ rows }: { rows: Lead[] }) {
           </tbody>
         </table>
       </div>
+      {total > 50 ? <div style={{ display: "flex", justifyContent: "flex-end", padding: 14 }}><Pagination current={page} pageSize={50} total={total} showSizeChanger={false} onChange={onPage} /></div> : null}
     </div>
   );
 }

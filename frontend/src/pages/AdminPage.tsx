@@ -206,6 +206,10 @@ export default function AdminPage() {
                 onChange={() => update((c) => { c.schedule.production_calendar = !c.schedule.production_calendar; })}
               />
             </SetRow>
+            <div className="field" style={{ marginTop: 14 }}>
+              <label>Дополнительные нерабочие дни и переносы (ГГГГ-ММ-ДД, по одному в строке)</label>
+              <textarea className="txt" rows={3} style={{ width: "100%" }} value={(cfg.schedule.holidays ?? []).join("\n")} onChange={(e) => update((c) => { c.schedule.holidays = e.target.value.split("\n").map((v) => v.trim()).filter(Boolean); })} />
+            </div>
           </div>
         </div>
 

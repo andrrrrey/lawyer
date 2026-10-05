@@ -42,6 +42,7 @@ export interface Employee {
   bitrix_user_id: string;
   legal_entity_key: string;
   department_key: string;
+  is_head?: boolean;
   enabled: boolean;
 }
 export interface Plan {
@@ -180,10 +181,14 @@ export interface OneCReceiptJournalRow {
   deal_status: string;
 }
 
-export function useOneCReceiptJournal(state = "all") {
-  return useQuery<OneCReceiptJournalRow[]>({
-    queryKey: ["admin", "one-c", "receipts", state],
-    queryFn: () => api.get(`/admin/one-c/receipts?state=${encodeURIComponent(state)}`),
+export interface OneCReceiptJournalResponse { items: OneCReceiptJournalRow[]; total: number; limit: number; offset: number }
+
+export function useOneCReceiptJournal(state = "all", page = 1, q = "") {
+  const params = new URLSearchParams({ state, limit: "25", offset: String((page - 1) * 25) });
+  if (q) params.set("q", q);
+  return useQuery<OneCReceiptJournalResponse>({
+    queryKey: ["admin", "one-c", "receipts", state, page, q],
+    queryFn: () => api.get(`/admin/one-c/receipts?${params.toString()}`),
   });
 }
 
@@ -273,6 +278,20 @@ export function useCreateManualExpense() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: ManualExpensePayload) => api.post<ManualExpense>("/admin/expenses", payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "expenses"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["romi"] });
+    },
+  });
+}
+
+export function useUpdateManualExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: ManualExpensePayload }) =>
+      api.put<ManualExpense>(`/admin/expenses/${id}`, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "expenses"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });

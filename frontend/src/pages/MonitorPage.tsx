@@ -3,7 +3,7 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { useCreateTask, useMonitorStats, useReview, useViolations } from "@/api/monitor";
+import { useCreateTask, useMonitorStats, useReview, useReviewDecision, useViolations } from "@/api/monitor";
 import { useFilterOptions } from "@/api/dashboard";
 import { ViolationRow } from "@/components/ViolationRow";
 
@@ -58,6 +58,7 @@ export default function MonitorPage() {
   });
   const review = useReview(scope);
   const createTask = useCreateTask();
+  const reviewDecision = useReviewDecision();
   const { message } = App.useApp();
   const [done, setDone] = useState<Set<string>>(new Set());
 
@@ -312,6 +313,11 @@ export default function MonitorPage() {
                   onTask={onTask}
                   taskPending={createTask.isPending}
                   taskDone={done.has(v.deal_key)}
+                  onJustified={(row) => reviewDecision.mutate(row, {
+                    onSuccess: () => message.success("Решение сохранено в истории"),
+                    onError: (e) => message.error(e instanceof Error ? e.message : "Не удалось сохранить решение"),
+                  })}
+                  decisionPending={reviewDecision.isPending}
                 />
               ))
             ) : (
@@ -340,13 +346,14 @@ export default function MonitorPage() {
   );
 }
 
-function ReviewRow({ v, onTask, taskPending, taskDone }: {
+function ReviewRow({ v, onTask, taskPending, taskDone, onJustified, decisionPending }: {
   v: import("@/api/monitor").Violation;
   onTask: (dealKey: string) => void;
   taskPending: boolean;
   taskDone: boolean;
+  onJustified: (payload: { deal_key: string; ptype: string; status: "justified" }) => void;
+  decisionPending: boolean;
 }) {
-  const { message } = App.useApp();
   return (
     <div className="deal">
       <div className="lft" style={{ background: "var(--violet)" }} />
@@ -362,7 +369,9 @@ function ReviewRow({ v, onTask, taskPending, taskDone }: {
         <div className="ai-note">{v.ai}</div>
       </div>
       <div className="act" style={{ display: "flex", gap: 8 }}>
-        <Button size="small" onClick={() => message.success("Помечено как обоснованное")}>
+        <Button size="small" loading={decisionPending} onClick={() => onJustified({
+          deal_key: v.deal_key, ptype: v.ptype, status: "justified",
+        })}>
           Обоснованно
         </Button>
         <Button

@@ -14,17 +14,19 @@ import {
 // какое поле Битрикс соответствует «причине отказа», «типу клиента» и т.д.
 export function FieldMapSection({
   targets,
-  initial,
+  initialMaps,
 }: {
   targets: FieldTarget[];
-  initial: FieldMap;
+  initialMaps: Record<"box" | "cloud", FieldMap>;
 }) {
-  const schema = useBitrixSchema();
+  const [source, setSource] = useState<"box" | "cloud">("box");
+  const schema = useBitrixSchema(source);
   const save = useSaveFieldMap();
   const { message } = App.useApp();
 
-  const [fields, setFields] = useState<Record<string, string>>(initial.fields ?? {});
-  const [required, setRequired] = useState<Set<string>>(new Set(initial.required ?? []));
+  const [drafts, setDrafts] = useState(initialMaps);
+  const fields = drafts[source].fields ?? {};
+  const required = new Set(drafts[source].required ?? []);
   const [loaded, setLoaded] = useState<BitrixSchema | null>(null);
 
   const onLoad = async () => {
@@ -47,7 +49,8 @@ export function FieldMapSection({
       const cleanFields: Record<string, string> = {};
       for (const [k, v] of Object.entries(fields)) if (v) cleanFields[k] = v;
       const cleanReq = [...required].filter((k) => cleanFields[k]);
-      await save.mutateAsync({ fields: cleanFields, required: cleanReq });
+      await save.mutateAsync({ source, fields: cleanFields, required: cleanReq });
+      setDrafts((prev) => ({ ...prev, [source]: { fields: cleanFields, required: cleanReq } }));
       message.success("Сопоставление полей сохранено");
     } catch (e) {
       message.error((e as Error).message);
@@ -58,24 +61,21 @@ export function FieldMapSection({
     { value: "", label: "— не сопоставлено —" },
     ...(loaded?.fields ?? []).map((f) => ({ value: f.code, label: `${f.title} · ${f.code}` })),
   ];
-  const toggleReq = (key: string, on: boolean) =>
-    setRequired((prev) => {
-      const next = new Set(prev);
+  const toggleReq = (key: string, on: boolean) => {
+      const next = new Set(required);
       if (on) next.add(key);
       else next.delete(key);
-      return next;
-    });
+      setDrafts((prev) => ({ ...prev, [source]: { ...prev[source], required: [...next] } }));
+  };
 
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <div className="card-h">
         <div>
           <h3>Поля и этапы Битрикс24</h3>
-          <span className="sub">сопоставление пользовательских полей воронки</span>
+          <span className="sub">отдельное сопоставление для каждого портала</span>
         </div>
-        <Button size="small" onClick={onLoad} loading={schema.isPending}>
-          Загрузить из Битрикс24
-        </Button>
+        <div style={{ display: "flex", gap: 8 }}><Select value={source} options={[{ value: "box", label: "Коробочный Bitrix24" }, { value: "cloud", label: "Облачный Bitrix24" }]} onChange={(value) => { setSource(value); setLoaded(null); }} /><Button size="small" onClick={onLoad} loading={schema.isPending}>Загрузить поля</Button></div>
       </div>
       <div className="card-p">
         {loaded && loaded.stages.length ? (
@@ -108,7 +108,7 @@ export function FieldMapSection({
                     options={options}
                     showSearch
                     optionFilterProp="label"
-                    onChange={(v) => setFields((p) => ({ ...p, [t.key]: v }))}
+                    onChange={(v) => setDrafts((prev) => ({ ...prev, [source]: { ...prev[source], fields: { ...prev[source].fields, [t.key]: v } } }))}
                   />
                   <Checkbox
                     checked={required.has(t.key)}

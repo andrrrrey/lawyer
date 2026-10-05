@@ -139,7 +139,10 @@ def test_plan_fact_for_all_scope_levels() -> None:
                     }
                     assert row["overall_completion"] == 50.0
 
-                departments = await metrics.departments(session, "30")
+                # Явный закрытый период делает проверку независимой от даты запуска.
+                departments = await metrics.departments(
+                    session, "range:2026-09-01:2026-09-30"
+                )
                 assert departments == [
                     {
                         "key": "sales", "name": "Продажи", "employees": 1,

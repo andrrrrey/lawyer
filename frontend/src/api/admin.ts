@@ -19,6 +19,7 @@ export interface RegulationConfig {
     work_from: string;
     work_to: string;
     production_calendar: boolean;
+    holidays?: string[];
   };
   task_logic: { assignee: string; assignee_options: string[]; template: string };
   evaluative: { highlight_spam: boolean; highlight_refusal: boolean; stuck_days: number };

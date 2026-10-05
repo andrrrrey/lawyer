@@ -20,13 +20,44 @@ async def insights(session: AsyncSession) -> list[dict]:
     ]
 
 
-async def budget_recs(session: AsyncSession) -> list[dict]:
-    rows = (await session.execute(select(BudgetRec).order_by(BudgetRec.position))).scalars().all()
+async def budget_recs(
+    session: AsyncSession, period: str = "30", legal_entity: str = "all",
+) -> list[dict]:
+    stmt = select(BudgetRec).order_by(BudgetRec.position)
+    if legal_entity and legal_entity != "all":
+        stmt = stmt.where(BudgetRec.legal_entity_key == legal_entity)
+    rows = (await session.execute(stmt)).scalars().all()
+    from app.core.config import settings
+    if settings.data_source == "real":
+        from app.services import channels as channel_service
+        from app.services.ingest import budget_recs_from_channels
+        current = await channel_service.for_period(
+            session, period, legal_entity=legal_entity,
+        )
+        if current is not None:
+            action_rows = rows
+            if legal_entity and legal_entity != "all":
+                action_rows = (await session.execute(
+                    select(BudgetRec).order_by(BudgetRec.position)
+                )).scalars().all()
+            stored = {(row.legal_entity_key, row.title): row for row in action_rows}
+            generated = budget_recs_from_channels(current)
+            for item in generated:
+                match = stored.get((legal_entity if legal_entity != "all" else "", item["title"]))
+                if match is None:
+                    match = next((row for row in action_rows if row.title == item["title"]), None)
+                item.update(
+                    id=match.id if match else 0,
+                    status=match.status if match else "new",
+                    deferred_until=match.deferred_until if match else None,
+                )
+            return generated
     return [
         {
-            "ic": r.ic, "svg": r.svg, "title": r.title, "tag_label": r.tag_label,
+            "id": r.id, "ic": r.ic, "svg": r.svg, "title": r.title, "tag_label": r.tag_label,
             "tag_class": r.tag_class, "text": r.text, "why": r.why, "impact": r.impact,
-            "src": r.src, "conf": r.conf, "dep": r.dep,
+            "src": r.src, "conf": r.conf, "dep": r.dep, "status": r.status,
+            "deferred_until": r.deferred_until,
         }
         for r in rows
     ]

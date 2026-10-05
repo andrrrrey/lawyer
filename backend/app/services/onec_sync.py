@@ -84,7 +84,6 @@ async def _backfill_missing_deals(
     connections = dict(factory.get_bitrix24_connections())
     from app.services.integrations_config import get_field_map
 
-    extra_fields = (await get_field_map(session)).get("fields") or {}
     existing_by_identity = {
         (deal.crm_source, deal.entity_type, str(deal.external_id)): deal
         for deal in deals if deal.external_id
@@ -94,6 +93,7 @@ async def _backfill_missing_deals(
     errors: dict[str, str] = {}
 
     for source_key, ids in requested_by_source.items():
+        extra_fields = (await get_field_map(session, source_key)).get("fields") or {}
         adapter = connections.get(source_key)
         if adapter is None:
             errors[source_key] = "Подключение Bitrix24 не настроено"

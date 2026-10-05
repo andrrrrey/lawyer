@@ -244,10 +244,12 @@ async def successful_deals(
     """Успешные сделки за период по фактической дате завершения Bitrix24."""
     now = datetime.now(UTC)
     closed = func.coalesce(Deal.closed_at, Deal.created_at)
+    from app.services import business_settings
+    config = await business_settings.get_settings(session)
     stmt = select(Deal).where(
         Deal.on_dashboard.is_(True),
         Deal.entity_type == "deal",
-        Deal.status_class == "st-ok",
+        business_settings.successful_stage_condition(config),
         closed.is_not(None),
         closed >= _period_start(period, now),
     )
@@ -255,9 +257,6 @@ async def successful_deals(
     if end is not None:
         stmt = stmt.where(closed < end)
     if not _has_filter(funnel):
-        from app.services import business_settings
-
-        config = await business_settings.get_settings(session)
         configured = business_settings.configured_funnel_condition(config)
         if configured is not None:
             stmt = stmt.where(configured)
@@ -280,6 +279,8 @@ async def _period_baseline(
     Маржа считается только если сопоставлено поле себестоимости (иначе 0).
     Фильтры «менеджер»/«источник» сужают выборку сделок; рекламные показатели
     (расход/клики/визиты) от них не зависят — см. _ad_totals."""
+    from app.services import business_settings
+    cfg = await business_settings.get_settings(session)
     rows = await period_deals(session, period, mgr, source, legal_entity, funnel)
     receipt_stmt = select(OneCReceipt).where(
         OneCReceipt.excluded.is_(False),
@@ -303,7 +304,12 @@ async def _period_baseline(
         payments = len(receipts)
     else:
         # Обратная совместимость демо/старых установок до настройки 1С.
-        won = [deal for deal in rows if deal.status_class == "st-ok"]
+        won = [
+            deal for deal in rows
+            if deal.status_class == "st-ok" or business_settings.stage_is_successful(
+                cfg, deal.crm_source, deal.funnel_id, deal.stage,
+            )
+        ]
         revenue = sum(int(deal.amount or 0) for deal in won)
         payments = len(won)
 
@@ -361,7 +367,16 @@ async def _period_baseline(
 
     return {
         "leads": float(len(lead_rows)),
-        "qual": float(sum(1 for d in rows if d.stage not in (None, "Новое обращение"))),
+        "qual": float(sum(
+            1 for d in rows
+            if business_settings.stage_is_qualified(
+                cfg, d.crm_source, d.funnel_id, d.stage,
+            ) or (
+                not business_settings.qualification_stages_configured(
+                    cfg, d.crm_source, d.funnel_id,
+                ) and d.stage not in (None, "Новое обращение")
+            )
+        )),
         "deals": float(len(deal_rows)),
         "contracts": float(contracts),
         "invoices": float(sum(1 for d in rows if d.invoice)),
@@ -850,22 +865,47 @@ async def revenue_series(
     legal_entity: FilterValue = "all",
     funnel: FilterValue = "all",
 ) -> dict:
+    if settings.data_source == "real" and settings.onec_endpoint:
+        now = datetime.now(UTC)
+        start, end = _period_start(period, now), _period_end(period, now)
+        stmt = (
+            select(
+                func.date(OneCReceipt.registrar_date).label("day"),
+                func.coalesce(func.sum(OneCReceipt.amount), 0),
+            )
+            .where(
+                OneCReceipt.excluded.is_(False),
+                OneCReceipt.registrar_date.is_not(None),
+                OneCReceipt.registrar_date >= start,
+            )
+            .group_by(func.date(OneCReceipt.registrar_date))
+            .order_by(func.date(OneCReceipt.registrar_date))
+        )
+        if end is not None:
+            stmt = stmt.where(OneCReceipt.registrar_date < end)
+        legal_values = _values(legal_entity)
+        if legal_values:
+            stmt = stmt.where(OneCReceipt.legal_entity_key.in_(legal_values))
+        if _has_filter(mgr) or (source and source != "all") or _has_filter(funnel):
+            stmt = stmt.join(Deal, OneCReceipt.matched_deal_id == Deal.id)
+            stmt = _by_deal_filters(stmt, mgr, source, legal_entity, funnel)
+        daily = (await session.execute(stmt)).all()
+        return {
+            "days": [str(day)[5:] for day, _ in daily],
+            "revenue": [round(float(amount or 0)) for _, amount in daily],
+            # Маржа без надёжной себестоимости не вычисляется. Поле сохранено
+            # для обратной совместимости контракта, но график его не рисует.
+            "margin": [],
+        }
     base, m = await _base_and_mult(
         session, period, mgr, source, legal_entity, funnel
     )
     days = ["09", "11", "13", "15", "17"] if per.norm_period(period) == "today" \
         else ["1", "5", "10", "15", "20", "25", "30"]
     total_rev = base.get("revenue", 0) * m
-    total_margin = base.get("margin", 0) * m
-    if settings.data_source == "real":
-        # Посуточной истории пока нет — показываем ровное распределение реального
-        # итога, без придуманной кривой роста и синтетической маржи (как в демо).
-        revenue = [round(total_rev / len(days))] * len(days)
-        margin = [round(total_margin / len(days))] * len(days)
-    else:
-        per_day = total_rev / len(days)
-        revenue = [round(per_day * (0.7 + i * 0.09)) for i in range(len(days))]
-        margin = [round(v * 0.34) for v in revenue]
+    per_day = total_rev / len(days)
+    revenue = [round(per_day * (0.7 + i * 0.09)) for i in range(len(days))]
+    margin = [round(v * 0.34) for v in revenue]
     return {"days": days, "revenue": revenue, "margin": margin}
 
 
@@ -1054,6 +1094,7 @@ async def _managers_from_deals(
         for item in config.get("funnels", []) if item.get("enabled", True)
     }
     agg: dict[str, dict] = {}
+    contact_minutes: dict[str, list[float]] = {}
     for d in deals:
         m = agg.setdefault(d.mgr, {
             "name": d.mgr, "inwork": 0, "invoices": 0, "payments": 0, "paysum": 0,
@@ -1064,6 +1105,10 @@ async def _managers_from_deals(
             (d.crm_source, d.funnel_id), set()
         ):
             m["invoices"] += 1
+        if d.created_at and d.first_contact_at and d.first_contact_at >= d.created_at:
+            contact_minutes.setdefault(d.mgr, []).append(
+                (d.first_contact_at - d.created_at).total_seconds() / 60
+            )
 
     if settings.onec_endpoint:
         receipt_stmt = (
@@ -1111,7 +1156,11 @@ async def _managers_from_deals(
         ov, nt = overdue.get(m["name"], 0), notask.get(m["name"], 0)
         zone_label, zone_class = _manager_zone(ov, nt)
         out.append({
-            **m, "overdue": ov, "notask": nt, "fc": "—",
+            **m, "overdue": ov, "notask": nt,
+            "fc": (
+                f"{round(median(contact_minutes[m['name']]), 1):g} мин"
+                if contact_minutes.get(m["name"]) else "—"
+            ),
             "paysum_display": f.money(m["paysum"]),
             "zone_label": zone_label, "zone_class": zone_class,
         })
@@ -1288,7 +1337,45 @@ async def leads(
     session: AsyncSession, mgr: FilterValue = "all", source: str = "all",
     risk: str | None = None, period: str = "30", legal_entity: FilterValue = "all",
     funnel: FilterValue = "all",
+    *, offset: int | None = None, limit: int | None = None,
 ) -> list[dict]:
+    stmt = _leads_stmt(period, mgr, source, risk, legal_entity, funnel)
+    stmt = stmt.order_by(Deal.position)
+    if offset is not None:
+        stmt = stmt.offset(max(offset, 0))
+    if limit is not None:
+        stmt = stmt.limit(max(limit, 1))
+    rows = (await session.execute(stmt)).scalars().all()
+    from app.services.integrations_config import bitrix_portal_base
+    portal_bases = {
+        source_key: await bitrix_portal_base(session, source_key)
+        for source_key in {d.crm_source for d in rows}
+    }
+    return [
+        {
+            "name": d.name, "src": d.src, "mgr": d.mgr,
+            "legal_entity_key": d.legal_entity_key,
+            "status_label": d.status_label, "status_class": d.status_class,
+            "fc": d.first_contact, "call": d.call, "inv": d.invoice, "pay": d.paid,
+            "amount": d.amount, "amount_display": f.money(d.amount) if d.amount else "—",
+            "risk": d.risk, "tags": d.tags, "ai": d.ai_comment,
+            "ai_source": d.ai_comment_source, "reason": d.refuse_reason,
+            "crm_url": (
+                f"{portal_bases[d.crm_source]}/crm/"
+                f"{'lead' if d.entity_type == 'lead' else 'deal'}"
+                f"/details/{d.external_id}/"
+                if portal_bases.get(d.crm_source) and d.external_id
+                else None
+            ),
+        }
+        for d in rows
+    ]
+
+
+def _leads_stmt(
+    period: str, mgr: FilterValue, source: str, risk: str | None,
+    legal_entity: FilterValue, funnel: FilterValue,
+):
     stmt = select(Deal).where(Deal.on_dashboard.is_(True))
     # В боевом режиме список лидов следует выбранному периоду (по дате создания),
     # чтобы переключатель периода менял и таблицу «Обработка лидов».
@@ -1302,17 +1389,15 @@ async def leads(
     stmt = _by_deal_filters(stmt, mgr, source, legal_entity, funnel)
     if risk == "risk":
         stmt = stmt.where(Deal.risk.is_not(None))
-    stmt = stmt.order_by(Deal.position)
-    rows = (await session.execute(stmt)).scalars().all()
-    return [
-        {
-            "name": d.name, "src": d.src, "mgr": d.mgr,
-            "legal_entity_key": d.legal_entity_key,
-            "status_label": d.status_label, "status_class": d.status_class,
-            "fc": d.first_contact, "call": d.call, "inv": d.invoice, "pay": d.paid,
-            "amount": d.amount, "amount_display": f.money(d.amount) if d.amount else "—",
-            "risk": d.risk, "tags": d.tags, "ai": d.ai_comment,
-            "ai_source": d.ai_comment_source, "reason": d.refuse_reason,
-        }
-        for d in rows
-    ]
+    return stmt
+
+
+async def leads_count(
+    session: AsyncSession, mgr: FilterValue = "all", source: str = "all",
+    risk: str | None = None, period: str = "30", legal_entity: FilterValue = "all",
+    funnel: FilterValue = "all",
+) -> int:
+    stmt = _leads_stmt(period, mgr, source, risk, legal_entity, funnel)
+    return int(await session.scalar(
+        select(func.count()).select_from(stmt.order_by(None).subquery())
+    ) or 0)

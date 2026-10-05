@@ -35,6 +35,7 @@ REGULATION = {
         "work_from": "09:00",
         "work_to": "18:00",
         "production_calendar": True,
+        "holidays": [],
     },
     # Логика создания задач
     "task_logic": {

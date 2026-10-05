@@ -125,7 +125,9 @@ def test_create_task_clears_no_task() -> None:
 
         after = await vio.evaluate_current(s)
         assert "no_task" not in _ptypes(after["regular"])
-        assert len(after["regular"]) == 5
+        # После устранения главного нарушения движок показывает следующее
+        # применимое правило той же сделки — нарушение цепочки касаний.
+        assert len(after["regular"]) == 6
 
     with_seeded(check)
 
@@ -148,7 +150,7 @@ def test_bitrix_open_action_clears_no_task() -> None:
 
         after = await vio.evaluate_current(s)
         assert "no_task" not in _ptypes(after["regular"])
-        assert len(after["regular"]) == 5
+        assert len(after["regular"]) == 6
 
     with_seeded(check)
 

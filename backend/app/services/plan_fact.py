@@ -136,7 +136,7 @@ async def rows(
             close_date.is_not(None),
             close_date >= start,
             close_date <= end,
-            Deal.status_class == "st-ok",
+            business_settings.successful_stage_condition(config),
         ]
 
         won_deals = int(await session.scalar(
