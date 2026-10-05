@@ -69,7 +69,16 @@ async def _evaluate_current_uncached(
 
     mgr/source — фильтры дашборда: сужают набор сделок до передачи в движок,
     чтобы счётчики триажа отвечали на выбор менеджера и источника."""
-    stmt = select(Deal).options(selectinload(Deal.tasks)).order_by(Deal.position)
+    # Успешно закрытые сделки движок регламента сразу пропускает: для них не
+    # рассчитываются ни текущие нарушения, ни случаи «отказ/спам на проверке».
+    # Не загружаем их вместе с задачами из БД — на больших порталах это заметно
+    # сокращает первый (ещё не кэшированный) расчёт дашборда.
+    stmt = (
+        select(Deal)
+        .where(Deal.status_class != "st-ok")
+        .options(selectinload(Deal.tasks))
+        .order_by(Deal.position)
+    )
     manager_values = _values(mgr)
     if manager_values:
         stmt = stmt.where(Deal.mgr.in_(manager_values))
