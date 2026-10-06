@@ -154,7 +154,7 @@ export function FilterBar() {
       ) : null}
       <div className="spacer" />
       {controls.includes("legalEntity") ? (
-        path === "/dashboard" ? (
+        path === "/dashboard" || path === "/analytics" ? (
           <Select
             className="fb-select fb-select-multiple"
             mode="multiple"
@@ -164,8 +164,10 @@ export function FilterBar() {
             value={f.legalEntity}
             onChange={(values) => {
               f.setLegalEntity(normalizedMulti(values));
-              f.setFunnel([]);
-              f.setLeadFilter(null);
+              if (path === "/dashboard") {
+                f.setFunnel([]);
+                f.setLeadFilter(null);
+              }
             }}
             options={multiOptions("Все юрлица", o.data?.legal_entities ?? [])}
           />

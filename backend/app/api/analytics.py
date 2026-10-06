@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_financial_access
@@ -18,33 +18,38 @@ router = APIRouter(
 )
 
 
+def _multi(values: list[str]) -> str | list[str]:
+    """Пустой выбор означает все юрлица, иначе используется OR по ключам."""
+    return values or "all"
+
+
 @router.get("/chain")
 async def get_chain(
     period: str = "30",
-    legal_entity: str = "all",
+    legal_entity: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    return await analytics.chain(session, period, legal_entity=legal_entity)
+    return await analytics.chain(session, period, legal_entity=_multi(legal_entity))
 
 
 @router.get("/channels")
 async def get_channels(
     channel: str = "all",
     period: str = "30",
-    legal_entity: str = "all",
+    legal_entity: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
     return await analytics.channels_table(
-        session, channel=channel, period=period, legal_entity=legal_entity
+        session, channel=channel, period=period, legal_entity=_multi(legal_entity)
     )
 
 
 @router.get("/reconciliation")
 async def get_reconciliation(
     period: str = "30",
-    legal_entity: str = "all",
+    legal_entity: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     return await analytics.reconciliation(
-        session, period=period, legal_entity=legal_entity
+        session, period=period, legal_entity=_multi(legal_entity)
     )

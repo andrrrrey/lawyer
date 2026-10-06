@@ -12,6 +12,14 @@ from app.seeds.chain import CHAIN_STEPS
 from app.services import channels as ch_svc
 from app.services import format as f
 
+FilterValue = str | list[str]
+
+
+def _values(value: FilterValue) -> list[str]:
+    if isinstance(value, list):
+        return [item for item in value if item and item != "all"]
+    return [] if not value or value == "all" else [value]
+
 
 def _digits(text: str) -> int:
     d = "".join(ch for ch in text if ch.isdigit())
@@ -23,7 +31,7 @@ def _has_num(text: str) -> bool:
 
 
 async def chain(
-    session: AsyncSession, period: str, legal_entity: str = "all"
+    session: AsyncSession, period: str, legal_entity: FilterValue = "all"
 ) -> list[dict]:
     from app.services import metrics
     base, m = await metrics._base_and_mult(
@@ -69,7 +77,7 @@ async def chain(
 
 
 async def reconciliation(
-    session: AsyncSession, period: str, legal_entity: str = "all"
+    session: AsyncSession, period: str, legal_entity: FilterValue = "all"
 ) -> dict:
     """Прозрачная сверка созданных сущностей Bitrix и денежных фактов 1С.
 
@@ -99,8 +107,9 @@ async def reconciliation(
     )
     if end is not None:
         receipt_stmt = receipt_stmt.where(OneCReceipt.registrar_date < end)
-    if legal_entity and legal_entity != "all":
-        receipt_stmt = receipt_stmt.where(OneCReceipt.legal_entity_key == legal_entity)
+    legal_values = _values(legal_entity)
+    if legal_values:
+        receipt_stmt = receipt_stmt.where(OneCReceipt.legal_entity_key.in_(legal_values))
     receipt_rows = list((await session.execute(receipt_stmt)).scalars().all())
     included = [row for row in receipt_rows if not row.excluded]
     excluded = [row for row in receipt_rows if row.excluded]
@@ -231,7 +240,7 @@ async def channels_table(
     session: AsyncSession,
     channel: str = "all",
     period: str = "30",
-    legal_entity: str = "all",
+    legal_entity: FilterValue = "all",
 ) -> list[dict]:
     """Сводка по каналам и кампаниям за выбранный период.
 

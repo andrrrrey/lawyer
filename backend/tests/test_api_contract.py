@@ -157,6 +157,13 @@ def test_analytics_channels(client: TestClient) -> None:
     assert social["romi"]["display"] == "нет данных"
 
 
+def test_analytics_accepts_multiple_legal_entities(client: TestClient) -> None:
+    params = [("legal_entity", "uo"), ("legal_entity", "csv")]
+    assert client.get("/api/analytics/chain", params=params).status_code == 200
+    assert client.get("/api/analytics/reconciliation", params=params).status_code == 200
+    assert client.get("/api/analytics/channels", params=params).status_code == 200
+
+
 def test_romi_endpoints(client: TestClient) -> None:
     assert len(client.get("/api/romi/by-channel").json()) == 5
     assert len(client.get("/api/romi/campaigns").json()) == 5

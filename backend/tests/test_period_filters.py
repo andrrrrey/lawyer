@@ -487,6 +487,61 @@ def test_chain_follows_period() -> None:
     with_real_data(check)
 
 
+def test_analytics_combines_selected_legal_entities() -> None:
+    """Мультивыбор суммирует выбранные юрлица и исключает остальные."""
+    async def check(s: AsyncSession) -> None:
+        deals = [
+            _deal(101, days_ago=0, mgr="Иванов", src="Сайт", amount=100_000),
+            _deal(102, days_ago=0, mgr="Иванов", src="Сайт", amount=200_000),
+            _deal(103, days_ago=0, mgr="Иванов", src="Сайт", amount=400_000),
+        ]
+        for deal, entity in zip(deals, ("uo", "csv", "urpase"), strict=True):
+            deal.legal_entity_key = entity
+        s.add_all(deals)
+        s.add_all([
+            AdCost(
+                date=NOW, campaign=f"Кампания {entity}", campaign_id=str(index),
+                legal_entity_key=entity, spend=spend, clicks=index, impressions=index * 10,
+            )
+            for index, (entity, spend) in enumerate(
+                (("uo", 100), ("csv", 200), ("urpase", 400)), start=1,
+            )
+        ])
+        s.add_all([
+            OneCReceipt(
+                external_key=f"multi-{entity}", registrar_id=f"payment-{entity}",
+                registrar_number=str(index), registrar_type="ПоступлениеНаСчет",
+                registrar_date=NOW, legal_entity_key=entity,
+                article_name="Юридические услуги", amount=amount, excluded=False,
+            )
+            for index, (entity, amount) in enumerate(
+                (("uo", 10_000), ("csv", 20_000), ("urpase", 40_000)), start=1,
+            )
+        ])
+        await s.commit()
+
+        selected = ["uo", "csv"]
+        baseline = await metrics._period_baseline(
+            s, "today", legal_entity=selected,
+        )
+        assert baseline["deals"] == 2
+        assert baseline["spend"] == 300
+
+        reconciliation = await analytics.reconciliation(
+            s, "today", legal_entity=selected,
+        )
+        assert reconciliation["bitrix"]["deals"] == 2
+        assert reconciliation["onec"]["payments"] == 2
+        assert reconciliation["onec"]["revenue"] == 30_000
+
+        channels = await analytics.channels_table(
+            s, period="today", legal_entity=selected,
+        )
+        assert sum(row["spend"] or 0 for row in channels) == 300
+
+    with_real_data(check)
+
+
 def test_custom_period_exact_date_and_interval() -> None:
     """Кастомный период: точная дата и интервал ограничивают выборку сверху и снизу.
 

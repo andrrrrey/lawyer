@@ -40,28 +40,31 @@ export interface Reconciliation {
   }>;
 }
 
-export const useChain = (period: string, legalEntity: string) =>
+const analyticsParams = (period: string, legalEntities: string[], channel?: string) => {
+  const q = new URLSearchParams({ period });
+  legalEntities.forEach((value) => q.append("legal_entity", value));
+  if (channel && channel !== "all") q.set("channel", channel);
+  return q.toString();
+};
+
+export const useChain = (period: string, legalEntities: string[]) =>
   useQuery<ChainStep[]>({
-    queryKey: ["analytics", "chain", period, legalEntity],
-    queryFn: () => api.get(`/analytics/chain?period=${encodeURIComponent(period)}&legal_entity=${encodeURIComponent(legalEntity)}`),
+    queryKey: ["analytics", "chain", period, legalEntities],
+    queryFn: () => api.get(`/analytics/chain?${analyticsParams(period, legalEntities)}`),
   });
 
-export const useReconciliation = (period: string, legalEntity: string) =>
+export const useReconciliation = (period: string, legalEntities: string[]) =>
   useQuery<Reconciliation>({
-    queryKey: ["analytics", "reconciliation", period, legalEntity],
+    queryKey: ["analytics", "reconciliation", period, legalEntities],
     queryFn: () => api.get(
-      `/analytics/reconciliation?period=${encodeURIComponent(period)}` +
-        `&legal_entity=${encodeURIComponent(legalEntity)}`,
+      `/analytics/reconciliation?${analyticsParams(period, legalEntities)}`,
     ),
   });
 
-export const useChannels = (channel: string, period: string, legalEntity: string) =>
+export const useChannels = (channel: string, period: string, legalEntities: string[]) =>
   useQuery<ChannelRow[]>({
-    queryKey: ["analytics", "channels", channel, period, legalEntity],
-    queryFn: () =>
-      api.get(
-        `/analytics/channels?channel=${encodeURIComponent(channel)}` +
-          `&period=${encodeURIComponent(period)}` +
-          `&legal_entity=${encodeURIComponent(legalEntity)}`,
-      ),
+    queryKey: ["analytics", "channels", channel, period, legalEntities],
+    queryFn: () => api.get(
+      `/analytics/channels?${analyticsParams(period, legalEntities, channel)}`,
+    ),
   });
