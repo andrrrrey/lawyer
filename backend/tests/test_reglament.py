@@ -69,6 +69,19 @@ def test_threshold_sensitivity() -> None:
     with_seeded(check)
 
 
+def test_stuck_message_distinguishes_stage_age_from_recent_touch() -> None:
+    """«Зависшая» описывает возраст этапа, не отрицает имеющиеся касания."""
+    async def check(s: AsyncSession) -> None:
+        result = await vio.evaluate_current(s)
+        stuck = next(item for item in result["regular"] if item["ptype"] == "stuck")
+
+        assert "Сделка находится на этапе" in stuck["ai"]
+        assert "Последнее зафиксированное касание:" in stuck["ai"]
+        assert "Нет движения по этапу и повторных касаний" not in stuck["ai"]
+
+    with_seeded(check)
+
+
 def test_failed_semantic_stage_is_not_an_active_violation() -> None:
     """Проваленная стадия исключается по семантике, даже при необычном названии."""
     async def check(s: AsyncSession) -> None:

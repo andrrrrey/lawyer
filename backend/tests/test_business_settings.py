@@ -302,3 +302,32 @@ def test_bitrix_users_api_lists_both_connections(client, monkeypatch) -> None:
         ("box", False),
         ("cloud", False),
     ]
+
+
+def test_bitrix_sources_api_includes_unused_remote_source(client, monkeypatch) -> None:
+    from app.api import integrations
+    from app.core.config import settings
+    from app.integrations.real.bitrix24 import RealBitrix24Adapter
+
+    async def keep_test_settings(session) -> None:  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(integrations.cfg, "apply_overrides_from_db", keep_test_settings)
+    monkeypatch.setattr(settings, "bitrix_box_webhook_url", "https://box.example/rest/1/x")
+    monkeypatch.setattr(settings, "bitrix_cloud_webhook_url", "")
+    monkeypatch.setattr(
+        RealBitrix24Adapter,
+        "fetch_source_catalog",
+        lambda self: [  # noqa: ARG005
+            {"id": "site", "name": "Сайт", "origin": "standard"},
+            {"id": "501", "name": "полезный", "origin": "deal_source_auto"},
+        ],
+    )
+
+    response = client.get("/api/integrations/bitrix/sources")
+
+    assert response.status_code == 200
+    box, cloud = response.json()["sources"]
+    assert box["ok"] is True
+    assert "полезный" in box["items"]
+    assert cloud["configured"] is False

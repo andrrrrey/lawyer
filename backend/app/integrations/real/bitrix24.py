@@ -716,6 +716,60 @@ class RealBitrix24Adapter:
                 out.append({"id": str(sid), "name": s.get("NAME") or str(sid)})
         return out
 
+    def fetch_source_catalog(self) -> list[dict]:
+        """Полный справочник источников для настроек аналитики.
+
+        Стандартный ``SOURCE_ID`` и пользовательское поле «Источник (авто)» -
+        разные справочники Bitrix24. Для фильтров отчётов достаточно значений из
+        фактических сделок, но в настройках расходов источник должен быть доступен
+        ещё до появления первой сделки. Поэтому здесь объединяются оба каталога
+        сделок и лидов. Недоступность пользовательских полей не блокирует
+        стандартный справочник.
+        """
+        result = [
+            {**item, "origin": "standard"}
+            for item in self.fetch_sources()
+        ]
+        definitions: list[tuple[str, list[dict]]] = []
+        try:
+            definitions.append(("deal_source_auto", self._deal_field_definitions()))
+        except Exception as exc:  # noqa: BLE001 - SOURCE_ID уже доступен
+            logger.warning(
+                "Битрикс24 (%s): справочник «Источник (авто)» сделок недоступен: %s",
+                self.source_key,
+                exc,
+            )
+        try:
+            definitions.append(("lead_source_auto", self._lead_field_definitions()))
+        except Exception as exc:  # noqa: BLE001 - лиды могут быть недоступны вебхуку
+            logger.warning(
+                "Битрикс24 (%s): справочник «Источник (авто)» лидов недоступен: %s",
+                self.source_key,
+                exc,
+            )
+
+        for origin, fields in definitions:
+            source_auto = next(
+                (
+                    item for item in fields
+                    if str(item.get("title") or "").strip().casefold()
+                    in {"источник (авто)", "источник авто"}
+                ),
+                None,
+            )
+            if not source_auto:
+                continue
+            for option in source_auto.get("items", []):
+                value = option.get("VALUE") or option.get("ID")
+                if value is None:
+                    continue
+                result.append({
+                    "id": str(option.get("ID") or value),
+                    "name": str(value),
+                    "origin": origin,
+                })
+        return result
+
     def fetch_deal_responsible(self, deal_id: str) -> str:
         """Текущий ответственный по сделке (ASSIGNED_BY_ID) прямо из портала.
 

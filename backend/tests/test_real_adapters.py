@@ -357,6 +357,26 @@ def test_bitrix_fetch_funnels_normalizes_category_list(monkeypatch) -> None:
     ]
 
 
+def test_bitrix_source_catalog_combines_standard_and_source_auto(monkeypatch) -> None:
+    adapter = bitrix24.RealBitrix24Adapter()
+    monkeypatch.setattr(
+        adapter,
+        "fetch_sources",
+        lambda: [{"id": "site", "name": "Сайт"}],
+    )
+    adapter._deal_fields_cache = [{
+        "code": "UF_CRM_SOURCE_AUTO",
+        "title": "Источник (авто)",
+        "items": [{"ID": "501", "VALUE": "полезный"}],
+    }]
+    adapter._lead_fields_cache = []
+
+    assert adapter.fetch_source_catalog() == [
+        {"id": "site", "name": "Сайт", "origin": "standard"},
+        {"id": "501", "name": "полезный", "origin": "deal_source_auto"},
+    ]
+
+
 def _rest_stub(calls: list[tuple[str, dict]], *, deal_responsible: str = "12"):
     """Заглушка REST: сделка с ответственным, создание задачи и дела, справочник имён."""
     def fake_rest(method: str, payload: dict):

@@ -23,6 +23,7 @@ from app.models import Deal
 from app.services import integrations_check as checker
 from app.services import integrations_config as cfg
 from app.services import maintenance
+from app.services import sources as source_service
 
 router = APIRouter(
     prefix="/integrations",
@@ -283,6 +284,72 @@ async def bitrix_users(
                 ),
                 key=lambda user: (str(user["name"]).casefold(), str(user["id"])),
             )
+            sources.append(item)
+        return {"sources": sources}
+
+    return await run_in_threadpool(_load)
+
+
+@router.get("/bitrix/sources")
+async def bitrix_sources(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Полные справочники источников обоих Bitrix24 для настроек и расходов.
+
+    В отличие от фильтра дашборда здесь показываются и ещё не использованные
+    значения. Источники из уже загруженных сделок добавляются как резерв на
+    случай временной недоступности API или текстового поля «Источник (авто)».
+    """
+    await cfg.apply_overrides_from_db(session)
+    known_rows = (await session.execute(
+        select(Deal.crm_source, Deal.src)
+        .where(Deal.src.is_not(None), Deal.src != "", Deal.src != "—")
+        .distinct()
+    )).all()
+    known: dict[str, set[str]] = {}
+    for source_key, value in known_rows:
+        normalized = source_service.canonical_source(str(value))
+        if normalized != "—":
+            known.setdefault(str(source_key), set()).add(normalized)
+
+    def _load() -> dict[str, Any]:
+        from app.integrations.real.bitrix24 import RealBitrix24Adapter
+
+        connections = [
+            ("box", "Коробочный Bitrix24", settings.bitrix_box_webhook_url),
+            ("cloud", "Облачный Bitrix24", settings.bitrix_cloud_webhook_url),
+        ]
+        sources: list[dict[str, Any]] = []
+        for key, name, webhook_url in connections:
+            configured = bool((webhook_url or "").strip())
+            values = set(known.get(key, set()))
+            item: dict[str, Any] = {
+                "key": key,
+                "name": name,
+                "configured": configured,
+                "ok": False,
+                "items": [],
+            }
+            if not configured:
+                item["error"] = "Сначала сохраните URL входящего вебхука."
+            else:
+                try:
+                    adapter = RealBitrix24Adapter(
+                        webhook_url=webhook_url, source_key=key
+                    )
+                    for remote in adapter.fetch_source_catalog():
+                        value = source_service.canonical_source(
+                            str(remote.get("name") or "")
+                        )
+                        if value != "—":
+                            values.add(value)
+                    item["ok"] = True
+                except Exception:  # noqa: BLE001 - не раскрываем URL/токен
+                    item["error"] = (
+                        "Не удалось получить справочник источников. "
+                        "Показаны значения из уже загруженных сделок."
+                    )
+            item["items"] = sorted(values, key=str.casefold)
             sources.append(item)
         return {"sources": sources}
 

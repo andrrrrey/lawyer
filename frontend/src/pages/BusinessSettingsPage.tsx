@@ -13,6 +13,7 @@ import {
   type Plan,
   downloadOneCUnmatchedReport,
   useBitrixFunnels,
+  useBitrixSources,
   useBitrixUsers,
   useBusinessSettings,
   useCreateExpenseArticle,
@@ -43,6 +44,7 @@ function Card({ title, subtitle, children }: React.PropsWithChildren<{ title: st
 export default function BusinessSettingsPage() {
   const query = useBusinessSettings();
   const bitrixFunnels = useBitrixFunnels();
+  const bitrixSources = useBitrixSources();
   const bitrixUsers = useBitrixUsers();
   const dashboardFilters = useFilterOptions();
   const save = useSaveBusinessSettings();
@@ -149,8 +151,9 @@ export default function BusinessSettingsPage() {
       label: item.name,
     }));
   const savedPlanSources = draft.plans.map((plan) => plan.lead_source).filter(Boolean);
+  const catalogSources = (bitrixSources.data?.sources ?? []).flatMap((source) => source.items);
   const planSourceOptions = [...new Set([
-    ...(dashboardFilters.data?.sources ?? []), ...savedPlanSources,
+    ...catalogSources, ...(dashboardFilters.data?.sources ?? []), ...savedPlanSources,
   ])].map((value) => ({ value, label: value }));
   const selectedPlanMonth = planMonth.format("YYYY-MM");
   const previousPlanMonth = planMonth.subtract(1, "month").format("YYYY-MM");
@@ -196,7 +199,7 @@ export default function BusinessSettingsPage() {
     .map((expense) => expense.channel)
     .filter(Boolean);
   const expenseSourceOptions = [...new Set([
-    ...(dashboardFilters.data?.sources ?? []), ...savedExpenseSources,
+    ...catalogSources, ...(dashboardFilters.data?.sources ?? []), ...savedExpenseSources,
   ])].map((value) => ({ value, label: value }));
   const selectedExpenseArticle = (expenseArticles.data ?? []).find(
     (item) => item.persisted && item.name === expenseDraft.article,
@@ -590,13 +593,13 @@ export default function BusinessSettingsPage() {
                   showSearch
                   optionFilterProp="label"
                   disabled={!expenseDraft.include_in_romi}
-                  loading={dashboardFilters.isLoading}
+                  loading={dashboardFilters.isLoading || bitrixSources.isLoading}
                   style={{ width: 240 }}
                   placeholder="Выберите источник из Bitrix24"
                   value={expenseDraft.channel || undefined}
                   options={expenseSourceOptions}
                   onChange={(value) => setExpenseDraft((x) => ({ ...x, channel: value ?? "" }))}
-                  notFoundContent="Источники появятся после загрузки сделок из Bitrix24"
+                  notFoundContent="Источник не найден в справочниках Bitrix24"
                 />
               </div>
               <div className="field"><label>Кампания</label><Input disabled={!expenseDraft.include_in_romi} style={{ width: 180 }} placeholder="Необязательно" value={expenseDraft.campaign} onChange={(e) => setExpenseDraft((x) => ({ ...x, campaign: e.target.value }))} /></div>

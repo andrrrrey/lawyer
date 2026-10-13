@@ -132,6 +132,15 @@ export interface BitrixUserSource {
   users: BitrixUserOption[];
 }
 
+export interface BitrixLeadSourceCatalog {
+  key: string;
+  name: string;
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  items: string[];
+}
+
 export function useBitrixFunnels() {
   return useQuery<{ sources: BitrixFunnelSource[] }>({
     queryKey: ["integrations", "bitrix", "funnels"],
@@ -145,6 +154,15 @@ export function useBitrixUsers() {
     queryKey: ["integrations", "bitrix", "users"],
     queryFn: () => api.get("/integrations/bitrix/users"),
     staleTime: 60_000,
+  });
+}
+
+export function useBitrixSources() {
+  return useQuery<{ sources: BitrixLeadSourceCatalog[] }>({
+    queryKey: ["integrations", "bitrix", "sources"],
+    queryFn: () => api.get("/integrations/bitrix/sources"),
+    staleTime: 300_000,
+    refetchInterval: 300_000,
   });
 }
 

@@ -68,6 +68,9 @@ class MockBitrix24Adapter:
         # В mock источники уже заданы читаемыми названиями в демо-сделках.
         return []
 
+    def fetch_source_catalog(self) -> list[dict]:
+        return self.fetch_sources()
+
     def fetch_contact_phones(self, contact_ids: list[str]) -> dict[str, str]:  # noqa: ARG002
         # В mock телефоны уже заданы в демо-сделках.
         return {}

@@ -330,11 +330,21 @@ def evaluate(deals: list[Deal], config_data: dict, now: datetime) -> dict:
                 if "р." in unit else days
             )
             if elapsed_value > limit:
+                last_touch = (
+                    deal.last_activity_at.strftime("%d.%m.%Y")
+                    if deal.last_activity_at
+                    else "нет данных"
+                )
                 regular.append(_mk(
                     deal, "stuck", over=True, sla=format_days(days),
                     norm=f"этап «{stage}» · норматив {limit} {unit}",
                     amount=deal.amount,
-                    ai="Нет движения по этапу и повторных касаний. Высокий риск потери.",
+                    ai=(
+                        f"Сделка находится на этапе «{stage}» {format_days(days)} "
+                        f"при нормативе {limit} {unit}. Последнее зафиксированное "
+                        f"касание: {last_touch}. Проверьте необходимость перехода "
+                        "на следующий этап."
+                    ),
                 ))
                 continue
 
