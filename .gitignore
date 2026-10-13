@@ -22,6 +22,9 @@ frontend/.vite/
 postgres-data/
 *.log
 
+# Локальные сборочные артефакты
+output/
+
 # IDE / ОС
 .idea/
 .vscode/
