@@ -2,6 +2,8 @@
 
 from fastapi.testclient import TestClient
 
+from app.api.dashboard import _scope_plan_rows
+from app.api.deps import AuthUser
 from app.main import app
 
 
@@ -75,3 +77,30 @@ def test_disabled_user_cannot_login(client: TestClient) -> None:
         })
         assert response.status_code == 401
     client.delete(f"/api/admin/users/{created.json()['id']}")
+
+
+def test_head_sees_own_department_and_company_plans() -> None:
+    """Руководителю доступны план отдела и общий план его юрлица."""
+    rows = [
+        {"key": "dept-u", "scope_type": "department", "scope_key": "sales",
+         "legal_entity_key": "urpase"},
+        {"key": "dept-other", "scope_type": "department", "scope_key": "other",
+         "legal_entity_key": "uo"},
+        {"key": "company-u", "scope_type": "company", "scope_key": "urpase",
+         "legal_entity_key": "urpase"},
+        {"key": "company-c", "scope_type": "company", "scope_key": "csv",
+         "legal_entity_key": "csv"},
+        {"key": "company-o", "scope_type": "company", "scope_key": "uo",
+         "legal_entity_key": "uo"},
+    ]
+    config = {"employees": [
+        {"key": "e1", "department_key": "sales", "legal_entity_key": "urpase",
+         "enabled": True},
+        {"key": "e2", "department_key": "sales", "legal_entity_key": "csv",
+         "enabled": True},
+    ]}
+    user = AuthUser(login="head", role="head", department_key="sales")
+
+    visible = _scope_plan_rows(rows, user, config)
+
+    assert [row["key"] for row in visible] == ["dept-u", "company-u", "company-c"]

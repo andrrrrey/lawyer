@@ -51,6 +51,49 @@ def _multi(values: list[str]) -> str | list[str]:
     return values or "all"
 
 
+def _scope_plan_rows(
+    rows: list[dict[str, Any]], user: AuthUser, config: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Ограничивает план-факт областью роли, сохраняя полезный контекст.
+
+    Руководителю нужны две строки для управления: собственный отдел и общий
+    план компании. Юрлица общего плана определяются по планам его отдела и по
+    сотрудникам отдела — так совмещённый отдел УрПАСЭ/ЦСВ может иметь отдельный
+    план для каждого юрлица и не открывает руководителю чужие компании.
+    """
+    if user.role == "manager":
+        return [
+            row for row in rows
+            if row.get("scope_type") == "employee"
+            and row.get("scope_key") == user.employee_key
+        ]
+    if user.role != "head":
+        return rows
+
+    department_rows = [
+        row for row in rows
+        if row.get("scope_type") == "department"
+        and row.get("scope_key") == user.department_key
+    ]
+    entity_keys = {
+        str(row.get("legal_entity_key") or "") for row in department_rows
+        if row.get("legal_entity_key")
+    }
+    entity_keys.update(
+        str(employee.get("legal_entity_key") or "")
+        for employee in config.get("employees", [])
+        if employee.get("enabled", True)
+        and str(employee.get("department_key") or "") == user.department_key
+        and employee.get("legal_entity_key")
+    )
+    company_rows = [
+        row for row in rows
+        if row.get("scope_type") == "company"
+        and str(row.get("legal_entity_key") or "") in entity_keys
+    ]
+    return department_rows + company_rows
+
+
 @router.get("/kpis")
 async def get_kpis(
     period: str = "30",
@@ -291,20 +334,14 @@ async def get_plan_fact(
                 and row.get("scope_name") in selected_managers
             ]
         if user.role == "manager":
-            result = [
-                row for row in result
-                if row.get("scope_type") == "employee" and row.get("scope_key") == user.employee_key
-            ]
+            result = _scope_plan_rows(result, user, {})
             for row in result:
                 for section in ("plan", "fact", "completion"):
                     row[section]["revenue"] = None
                     row[section]["payments"] = None
         elif user.role == "head":
-            result = [
-                row for row in result
-                if row.get("scope_type") == "department"
-                and row.get("scope_key") == user.department_key
-            ]
+            config = await business_settings.get_settings(session)
+            result = _scope_plan_rows(result, user, config)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

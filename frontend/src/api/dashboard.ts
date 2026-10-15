@@ -46,6 +46,7 @@ export interface PlanFactValues {
 export interface PlanFactRow {
   key: string;
   scope_type: "company" | "department" | "employee";
+  legal_entity_key: string;
   scope_name: string;
   legal_entity_name: string;
   funnel: string;

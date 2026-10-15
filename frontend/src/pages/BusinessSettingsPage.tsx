@@ -744,43 +744,52 @@ export default function BusinessSettingsPage() {
             ) : null}
             {visiblePlans.map(({ row, index }) => (
               <div className="setrow" key={row.key} style={{ gap: 8, flexWrap: "wrap" }}>
-                <Select
-                  style={{ width: 145 }}
-                  value={row.scope_type}
-                  options={[
-                    { value: "company", label: "Компания" },
-                    { value: "department", label: "Отдел" },
-                    { value: "employee", label: "Сотрудник" },
-                  ]}
-                  onChange={(scope: Plan["scope_type"]) => mutate((x) => {
-                    x.plans[index].scope_type = scope;
-                    x.plans[index].scope_key = scope === "company"
-                      ? x.plans[index].legal_entity_key
-                      : planTargetOptions(scope)[0]?.value ?? "";
-                  })}
-                />
-                {row.scope_type !== "company" ? (
+                <div className="field">
+                  <label>Уровень плана</label>
                   <Select
-                    style={{ width: 190 }}
-                    placeholder={row.scope_type === "department" ? "Отдел" : "Сотрудник"}
-                    options={planTargetOptions(row.scope_type)}
-                    value={row.scope_key || undefined}
-                    onChange={(value) => mutate((x) => { x.plans[index].scope_key = value; })}
+                    style={{ width: 165 }}
+                    value={row.scope_type}
+                    options={[
+                      { value: "company", label: "Компания целиком" },
+                      { value: "department", label: "Отдел" },
+                      { value: "employee", label: "Сотрудник" },
+                    ]}
+                    onChange={(scope: Plan["scope_type"]) => mutate((x) => {
+                      x.plans[index].scope_type = scope;
+                      x.plans[index].scope_key = scope === "company"
+                        ? x.plans[index].legal_entity_key
+                        : planTargetOptions(scope)[0]?.value ?? "";
+                    })}
                   />
+                </div>
+                {row.scope_type !== "company" ? (
+                  <div className="field">
+                    <label>{row.scope_type === "department" ? "Какой отдел" : "Какой сотрудник"}</label>
+                    <Select
+                      style={{ width: 210 }}
+                      placeholder={row.scope_type === "department" ? "Отдел" : "Сотрудник"}
+                      options={planTargetOptions(row.scope_type)}
+                      value={row.scope_key || undefined}
+                      onChange={(value) => mutate((x) => { x.plans[index].scope_key = value; })}
+                    />
+                  </div>
                 ) : null}
-                <Select
-                  style={{ width: 120 }}
-                  placeholder="Юрлицо"
-                  options={entityOptions}
-                  value={row.legal_entity_key || undefined}
-                  onChange={(value) => mutate((x) => {
-                    x.plans[index].legal_entity_key = value;
-                    if (x.plans[index].scope_type === "company") x.plans[index].scope_key = value;
-                    if (!planFunnelOptions(value).some((option) => option.value === x.plans[index].funnel)) {
-                      x.plans[index].funnel = "";
-                    }
-                  })}
-                />
+                <div className="field">
+                  <label>Юридическое лицо</label>
+                  <Select
+                    style={{ width: 145 }}
+                    placeholder="Юрлицо"
+                    options={entityOptions}
+                    value={row.legal_entity_key || undefined}
+                    onChange={(value) => mutate((x) => {
+                      x.plans[index].legal_entity_key = value;
+                      if (x.plans[index].scope_type === "company") x.plans[index].scope_key = value;
+                      if (!planFunnelOptions(value).some((option) => option.value === x.plans[index].funnel)) {
+                        x.plans[index].funnel = "";
+                      }
+                    })}
+                  />
+                </div>
                 <Select
                   style={{ width: 230 }}
                   allowClear

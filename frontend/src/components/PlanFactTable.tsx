@@ -1,4 +1,5 @@
 import type { PlanFactRow, PlanFactValues } from "@/api/dashboard";
+import { Tag } from "antd";
 
 const METRICS: { key: keyof PlanFactValues; label: string; money?: boolean }[] = [
   { key: "revenue", label: "Выручка, ₽", money: true },
@@ -11,6 +12,12 @@ const METRICS: { key: keyof PlanFactValues; label: string; money?: boolean }[] =
 
 const number = (value: number | null, money = false) =>
   value === null ? "Скрыто" : `${value.toLocaleString("ru-RU")}${money ? " ₽" : ""}`;
+
+const SCOPE_META = {
+  company: { label: "План компании", color: "blue" },
+  department: { label: "План отдела", color: "purple" },
+  employee: { label: "Личный план", color: "green" },
+} as const;
 
 function Metric({ row, metric, money }: {
   row: PlanFactRow; metric: keyof PlanFactValues; money?: boolean;
@@ -43,6 +50,9 @@ export function PlanFactTable({ rows, financial = true }: { rows: PlanFactRow[];
             {rows.map((row) => (
               <tr key={row.key}>
                 <td>
+                  <Tag color={SCOPE_META[row.scope_type].color} style={{ marginBottom: 5 }}>
+                    {SCOPE_META[row.scope_type].label}
+                  </Tag>
                   <b>{row.scope_name}</b>
                   <div className="sub">{row.legal_entity_name}</div>
                   <div className="sub">{row.funnel_name} · {row.lead_source}</div>
