@@ -575,6 +575,15 @@ def _open_action_ids(deals: list[dict], adapter=None) -> set[str]:
         logger.warning("Битрикс24: задачи/дела сделок недоступны: %s", exc)
         return set()
 
+
+def _changed_action_ids(adapter, modified_after: str) -> set[str]:
+    """Сделки с изменившимися задачами/делами (best-effort)."""
+    try:
+        return adapter.fetch_changed_action_deal_ids(modified_after)
+    except Exception as exc:  # noqa: BLE001 — не блокируем синхронизацию сделок
+        logger.warning("Битрикс24: изменения задач/дел недоступны: %s", exc)
+        return set()
+
 # Запас перекрытия окна изменений: покрывает пропущенные тики планировщика и
 # расхождение часов с порталом, чтобы правка сделки не потерялась между запусками.
 _SYNC_OVERLAP_MINUTES = 30
@@ -956,7 +965,7 @@ async def refresh_deals(
     business_config = await business.get_settings(session)
     configured_pairs = set(business.configured_funnel_pairs(business_config))
     batches: list[
-        tuple[str, list[dict], tuple[dict, dict, dict, dict], set[str], object]
+        tuple[str, list[dict], tuple[dict, dict, dict, dict], set[str], set[str], object]
     ] = []
     successful_scopes: set[tuple[str, str]] = set()
     since = None if full else (now - timedelta(minutes=_SYNC_OVERLAP_MINUTES)).isoformat(
@@ -1011,17 +1020,17 @@ async def refresh_deals(
             manual_users=business.employee_names_for_source(business_config, source_key),
         )
         await _refresh_saved_manager_names(session, source_key, dictionaries[0])
+        raw_deals = [item for item in raw if item.get("entity_type", "deal") == "deal"]
+        action_check_ids = {
+            str(item.get("external_id")) for item in raw_deals if item.get("external_id")
+        }
+        if not full and "deal" in requested_types and since:
+            action_check_ids.update(_changed_action_ids(adapter, since))
+        action_ids = _open_action_ids(
+            [{"external_id": item} for item in sorted(action_check_ids)], adapter
+        )
         batches.append(
-            (
-                source_key,
-                raw,
-                dictionaries,
-                _open_action_ids(
-                    [item for item in raw if item.get("entity_type", "deal") == "deal"],
-                    adapter,
-                ),
-                adapter,
-            )
+            (source_key, raw, dictionaries, action_ids, action_check_ids, adapter)
         )
 
     existing = {
@@ -1039,7 +1048,7 @@ async def refresh_deals(
     next_position = max((d.position for d in existing.values()), default=-1) + 1
     position = 0
     seen: set[tuple[str, str, str]] = set()
-    for source_key, raw, dictionaries, action_ids, _adapter in batches:
+    for source_key, raw, dictionaries, action_ids, _action_check_ids, _adapter in batches:
         users, stages, sources_map, phones = dictionaries
         for nd in raw:
             entity_key = business.legal_entity_for_funnel(
@@ -1079,6 +1088,20 @@ async def refresh_deals(
             if ext:
                 seen.add(identity)
 
+    # Задача или CRM-дело могут измениться без изменения DATE_MODIFY родительской
+    # сделки. Поэтому обновляем признак и у сохранённых сделок, которые не вошли
+    # в короткую выборку сделок, но попали в выборку изменённых действий.
+    action_flags_updated = 0
+    for source_key, _raw, _dictionaries, action_ids, action_check_ids, _adapter in batches:
+        for external_id in action_check_ids:
+            current = existing.get((source_key, "deal", external_id))
+            if current is None:
+                continue
+            new_value = external_id in action_ids
+            if current.has_open_action != new_value:
+                current.has_open_action = new_value
+                action_flags_updated += 1
+
     removed = 0
     if full:
         # Только при полном чтении окна известно, каких сделок в портале больше нет.
@@ -1096,7 +1119,7 @@ async def refresh_deals(
     # отдельным идемпотентным проходом по всей таблице.
     normalized = await src_svc.normalize_existing(session)
     timeline: dict[str, dict[str, int | str]] = {}
-    for source_key, raw, dictionaries, _action_ids, adapter in batches:
+    for source_key, raw, dictionaries, _action_ids, _action_check_ids, adapter in batches:
         for entity_type in ("deal", "lead"):
             entity_rows = [
                 row for row in raw
@@ -1117,12 +1140,14 @@ async def refresh_deals(
     from app.services import deal_comments
     comments = await deal_comments.refresh_baseline(session)
     logger.info(
-        "Сверка сделок Битрикс24: создано=%d обновлено=%d удалено=%d источники=%d (full=%s)",
-        created, updated, removed, normalized, full,
+        "Сверка сделок Битрикс24: создано=%d обновлено=%d удалено=%d задачи=%d "
+        "источники=%d (full=%s)",
+        created, updated, removed, action_flags_updated, normalized, full,
     )
     return {
         "skipped": False, "created": created, "updated": updated,
         "removed": removed, "full": full, "timeline": timeline,
+        "action_flags_updated": action_flags_updated,
         "deal_comments": comments,
         "scopes": sorted(f"{source}:{entity}" for source, entity in successful_scopes),
     }

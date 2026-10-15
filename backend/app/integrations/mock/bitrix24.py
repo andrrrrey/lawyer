@@ -50,6 +50,9 @@ class MockBitrix24Adapter:
         # поэтому отдельный признак из «портала» не нужен.
         return set()
 
+    def fetch_changed_action_deal_ids(self, modified_after: str) -> set[str]:  # noqa: ARG002
+        return set()
+
     def fetch_users(self) -> list[dict]:
         # В mock ответственные уже заданы именами в демо-сделках.
         return []

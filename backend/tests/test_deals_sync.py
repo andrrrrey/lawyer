@@ -85,6 +85,8 @@ class FakeBitrix:
         self.users = [{"id": "12", "name": "Михаил Иванов"}]
         self.history: list[dict] = []
         self.activities: list[dict] = []
+        self.changed_action_ids: set[str] = set()
+        self.open_action_ids: set[str] = set()
         self.stages = [
             {"id": "NEW", "name": "Новое обращение"},
             {"id": "WON", "name": "Оплачено"},
@@ -124,8 +126,11 @@ class FakeBitrix:
     ):
         return [dict(row) for row in self.activities]
 
-    def fetch_open_action_deal_ids(self, deal_ids):  # noqa: ARG002
-        return set()
+    def fetch_open_action_deal_ids(self, deal_ids):
+        return self.open_action_ids.intersection(str(item) for item in deal_ids)
+
+    def fetch_changed_action_deal_ids(self, modified_after):  # noqa: ARG002
+        return set(self.changed_action_ids)
 
 
 def with_db(check: Callable[[AsyncSession], Coroutine[Any, Any, None]]) -> None:
@@ -383,6 +388,34 @@ def test_quick_sync_keeps_deals_outside_the_batch(monkeypatch) -> None:
         assert portal.last_call["modified_after"] and not portal.last_call["created_after"]
         names = {d.external_id: d.name for d in (await s.execute(select(Deal))).scalars().all()}
         assert names == {"100": "Первая", "101": "Вторая · обновлена"}
+
+    with_db(check)
+
+
+def test_quick_sync_updates_task_flag_without_modified_deal(monkeypatch) -> None:
+    """Новая/закрытая задача обновляет сделку, даже если DATE_MODIFY не менялся."""
+    async def check(s: AsyncSession) -> None:
+        portal = FakeBitrix([_raw("100", title="Сделка")])
+        monkeypatch.setattr(factory, "get_bitrix24", lambda: portal)
+        await ingest.refresh_deals(s, full=True)
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.has_open_action is False
+
+        # В короткой выдаче сделок пусто, но задача сделки была создана.
+        portal.deals = []
+        portal.changed_action_ids = {"100"}
+        portal.open_action_ids = {"100"}
+        result = await ingest.refresh_deals(s)
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.has_open_action is True
+        assert result["action_flags_updated"] == 1
+
+        # Завершение задачи тоже не обязано менять сделку — флаг должен сняться.
+        portal.open_action_ids = set()
+        result = await ingest.refresh_deals(s)
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.has_open_action is False
+        assert result["action_flags_updated"] == 1
 
     with_db(check)
 

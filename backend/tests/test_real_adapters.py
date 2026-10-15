@@ -221,6 +221,50 @@ def test_bitrix_fetch_deals_by_ids_uses_batched_id_filter(monkeypatch) -> None:
     assert all(row["crm_source"] == "cloud" for row in rows)
 
 
+def test_bitrix_changed_actions_include_activities_and_tasks(monkeypatch) -> None:
+    """Изменённые дела и задачи возвращают ID связанных сделок."""
+    adapter = bitrix24.RealBitrix24Adapter(source_key="cloud")
+    calls: list[tuple[str, dict]] = []
+
+    def fake_call(method: str, params: dict | None = None) -> list[dict]:
+        calls.append((method, params or {}))
+        return [{"OWNER_ID": "100"}]
+
+    task_calls: list[tuple[dict, list[str]]] = []
+
+    def fake_list_tasks(task_filter: dict, select: list[str]) -> list[dict]:
+        task_calls.append((task_filter, select))
+        return [
+            {"ufCrmTask": ["D_101", "C_5"]},
+            {"UF_CRM_TASK": "D_102"},
+        ]
+
+    monkeypatch.setattr(adapter, "_call", fake_call)
+    monkeypatch.setattr(adapter, "_list_tasks", fake_list_tasks)
+
+    changed = adapter.fetch_changed_action_deal_ids("2026-10-15T10:00:00+00:00")
+
+    assert changed == {"100", "101", "102"}
+    assert calls[0][0] == "crm.activity.list"
+    assert calls[0][1]["filter"][">=LAST_UPDATED"] == "2026-10-15T10:00:00+00:00"
+    assert task_calls[0][0] == {">=CHANGED_DATE": "2026-10-15T10:00:00+00:00"}
+
+
+def test_bitrix_task_list_does_not_hide_rest_errors(monkeypatch) -> None:
+    class FakeResponse:
+        @staticmethod
+        def json() -> dict:
+            return {"error": "ACCESS_DENIED", "error_description": "No task access"}
+
+    monkeypatch.setattr(bitrix24, "request", lambda *a, **kw: FakeResponse())
+    adapter = bitrix24.RealBitrix24Adapter(
+        webhook_url="https://portal.example/rest/1/key", source_key="cloud"
+    )
+
+    with pytest.raises(RuntimeError, match="No task access"):
+        adapter._list_tasks({}, ["ID"])
+
+
 def test_onec_uses_post_with_iso_period_body(monkeypatch) -> None:
     calls: list[tuple[str, str, dict]] = []
 

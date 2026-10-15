@@ -881,20 +881,66 @@ class RealBitrix24Adapter:
 
         return found
 
+    def fetch_changed_action_deal_ids(self, modified_after: str) -> set[str]:
+        """Сделки, у которых после ``modified_after`` менялись задачи или дела.
+
+        Изменение задачи/CRM-дела не обязано менять ``DATE_MODIFY`` самой сделки.
+        Поэтому короткая синхронизация сделок должна отдельно находить такие
+        связи и заново вычислять для них признак открытого действия. В выборку
+        входят и завершённые действия: это позволяет не только поставить, но и
+        своевременно снять ``has_open_action``.
+        """
+        found: set[str] = set()
+
+        try:
+            rows = self._call("crm.activity.list", {
+                "filter": {"OWNER_TYPE_ID": 2, ">=LAST_UPDATED": modified_after},
+                "select": ["ID", "OWNER_ID", "LAST_UPDATED", "COMPLETED"],
+            })
+            found.update(str(row.get("OWNER_ID")) for row in rows if row.get("OWNER_ID"))
+        except Exception as exc:  # noqa: BLE001 — второй источник всё ещё полезен
+            logger.warning("Битрикс24: изменения CRM-дел недоступны: %s", exc)
+
+        try:
+            tasks = self._list_tasks(
+                {">=CHANGED_DATE": modified_after},
+                ["ID", "UF_CRM_TASK", "STATUS", "CHANGED_DATE"],
+            )
+            for task in tasks:
+                binding = task.get("ufCrmTask") or task.get("UF_CRM_TASK") or []
+                if isinstance(binding, str):
+                    binding = [binding]
+                found.update(
+                    text[2:]
+                    for value in binding
+                    if (text := str(value)).startswith("D_") and text[2:]
+                )
+        except Exception as exc:  # noqa: BLE001 — CRM-дела всё ещё полезны
+            logger.warning("Битрикс24: изменения задач недоступны: %s", exc)
+
+        return found
+
     def _open_tasks(self) -> list[dict]:
         """Незавершённые задачи портала с CRM-привязкой (постранично).
 
         tasks.task.list отдаёт иной конверт, чем crm.*-методы (список лежит в
         result.tasks), поэтому обходим страницы отдельно, а не через _call.
         """
+        return self._list_tasks({"!STATUS": 5}, ["ID", "UF_CRM_TASK"])
+
+    def _list_tasks(self, task_filter: dict, select: list[str]) -> list[dict]:
+        """Постраничный ``tasks.task.list`` с проверкой REST-конверта."""
         out: list[dict] = []
         start = 0
         with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
             while True:
                 resp = request("POST", f"{self._base()}/tasks.task.list.json", client=client, json={
-                    "filter": {"!STATUS": 5}, "select": ["ID", "UF_CRM_TASK"], "start": start,
+                    "filter": task_filter, "select": select, "start": start,
                 })
                 data = resp.json()
+                if isinstance(data, dict) and data.get("error"):
+                    msg = data.get("error_description") or data.get("error")
+                    raise RuntimeError(f"Битрикс24 отклонил tasks.task.list: {msg}")
                 result = data.get("result") or {}
                 tasks = result.get("tasks") if isinstance(result, dict) else None
                 if tasks:
@@ -902,6 +948,9 @@ class RealBitrix24Adapter:
                 nxt = data.get("next")
                 if not nxt:
                     break
+                if nxt == start:
+                    raise RuntimeError("Битрикс24 зациклил пагинацию tasks.task.list")
+                time.sleep(_PAGE_PAUSE_SECONDS)
                 start = nxt
         return out
 
