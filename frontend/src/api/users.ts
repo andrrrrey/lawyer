@@ -10,6 +10,8 @@ export interface AppUserRow {
   role: UserRole;
   employee_key: string;
   department_key: string;
+  scope_mode: "department" | "legal_entities";
+  legal_entity_keys: string[];
   enabled: boolean;
 }
 

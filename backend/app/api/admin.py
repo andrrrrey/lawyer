@@ -31,6 +31,8 @@ class AppUserPayload(BaseModel):
     role: str = "manager"
     employee_key: str = Field(default="", max_length=128)
     department_key: str = Field(default="", max_length=128)
+    scope_mode: str = "department"
+    legal_entity_keys: list[str] = Field(default_factory=list)
     enabled: bool = True
 
     @field_validator("login")
@@ -48,11 +50,19 @@ class AppUserPayload(BaseModel):
             raise ValueError("Неизвестная роль")
         return value
 
+    @field_validator("scope_mode")
+    @classmethod
+    def valid_scope_mode(cls, value: str) -> str:
+        if value not in {"department", "legal_entities"}:
+            raise ValueError("Неизвестная область доступа")
+        return value
+
 
 def _user_row(row: AppUser) -> dict[str, Any]:
     return {
         "id": row.id, "login": row.login, "role": row.role,
         "employee_key": row.employee_key, "department_key": row.department_key,
+        "scope_mode": row.scope_mode, "legal_entity_keys": row.legal_entity_keys or [],
         "enabled": row.enabled,
     }
 
@@ -65,10 +75,23 @@ async def _validate_user_scope(payload: AppUserPayload, session: AsyncSession) -
         str(item.get("key")) for item in config.get("employees", []) if item.get("enabled", True)
     }:
         raise HTTPException(status_code=422, detail="Для менеджера выберите активного сотрудника")
-    if payload.role == "head" and payload.department_key not in {
-        str(item.get("key")) for item in config.get("departments", []) if item.get("enabled", True)
-    }:
-        raise HTTPException(status_code=422, detail="Для руководителя выберите активный отдел")
+    if payload.role == "head":
+        if payload.scope_mode == "department" and payload.department_key not in {
+            str(item.get("key")) for item in config.get("departments", [])
+            if item.get("enabled", True)
+        }:
+            raise HTTPException(status_code=422, detail="Для руководителя выберите активный отдел")
+        active_entities = {
+            str(item.get("key")) for item in config.get("legal_entities", [])
+            if item.get("enabled", True)
+        }
+        if payload.scope_mode == "legal_entities" and (
+            not payload.legal_entity_keys
+            or not set(payload.legal_entity_keys).issubset(active_entities)
+        ):
+            raise HTTPException(
+                status_code=422, detail="Для руководителя выберите доступные юрлица"
+            )
 
 
 @router.get("/users")
@@ -88,7 +111,8 @@ async def create_user(
     row = AppUser(
         login=payload.login, password_hash=hash_password(payload.password),
         role=payload.role, employee_key=payload.employee_key,
-        department_key=payload.department_key, enabled=payload.enabled,
+        department_key=payload.department_key, scope_mode=payload.scope_mode,
+        legal_entity_keys=payload.legal_entity_keys, enabled=payload.enabled,
     )
     session.add(row)
     try:
@@ -116,6 +140,8 @@ async def update_user(
     row.role = payload.role
     row.employee_key = payload.employee_key
     row.department_key = payload.department_key
+    row.scope_mode = payload.scope_mode
+    row.legal_entity_keys = payload.legal_entity_keys
     row.enabled = payload.enabled
     if payload.password:
         row.password_hash = hash_password(payload.password)

@@ -65,6 +65,8 @@ class AppUser(Base):
     role: Mapped[str] = mapped_column(String(16), default="manager")
     employee_key: Mapped[str] = mapped_column(String(128), default="")
     department_key: Mapped[str] = mapped_column(String(128), default="")
+    scope_mode: Mapped[str] = mapped_column(String(24), default="department")
+    legal_entity_keys: Mapped[list] = mapped_column(JSON, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

@@ -7,6 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AiInsight, BudgetRec, RegulationConfig, SettingsHistory
 
+FilterValue = str | list[str]
+
+
+def _values(value: FilterValue) -> list[str]:
+    if isinstance(value, list):
+        return [item for item in value if item and item != "all"]
+    return [] if not value or value == "all" else [value]
+
 
 async def insights(session: AsyncSession) -> list[dict]:
     rows = (await session.execute(select(AiInsight).order_by(AiInsight.position))).scalars().all()
@@ -21,11 +29,12 @@ async def insights(session: AsyncSession) -> list[dict]:
 
 
 async def budget_recs(
-    session: AsyncSession, period: str = "30", legal_entity: str = "all",
+    session: AsyncSession, period: str = "30", legal_entity: FilterValue = "all",
 ) -> list[dict]:
     stmt = select(BudgetRec).order_by(BudgetRec.position)
-    if legal_entity and legal_entity != "all":
-        stmt = stmt.where(BudgetRec.legal_entity_key == legal_entity)
+    legal_values = _values(legal_entity)
+    if legal_values:
+        stmt = stmt.where(BudgetRec.legal_entity_key.in_(legal_values))
     rows = (await session.execute(stmt)).scalars().all()
     from app.core.config import settings
     if settings.data_source == "real":
@@ -36,14 +45,17 @@ async def budget_recs(
         )
         if current is not None:
             action_rows = rows
-            if legal_entity and legal_entity != "all":
+            if legal_values:
                 action_rows = (await session.execute(
-                    select(BudgetRec).order_by(BudgetRec.position)
+                    select(BudgetRec).where(
+                        BudgetRec.legal_entity_key.in_(legal_values)
+                    ).order_by(BudgetRec.position)
                 )).scalars().all()
             stored = {(row.legal_entity_key, row.title): row for row in action_rows}
             generated = budget_recs_from_channels(current)
             for item in generated:
-                match = stored.get((legal_entity if legal_entity != "all" else "", item["title"]))
+                entity_key = legal_values[0] if len(legal_values) == 1 else ""
+                match = stored.get((entity_key, item["title"]))
                 if match is None:
                     match = next((row for row in action_rows if row.title == item["title"]), None)
                 item.update(

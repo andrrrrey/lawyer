@@ -147,7 +147,7 @@ async def review(
 
 async def create_task_for(
     session: AsyncSession, ref: str | None = None, deal_key: str | None = None,
-    mgr: str | list[str] = "all",
+    mgr: FilterValue = "all", legal_entity: FilterValue = "all",
 ) -> dict:
     """Ставит задачу ответственному по сделке (по согласованной логике)."""
     # Доступы и режим источника данных сохраняются через UI в БД, а процессов
@@ -174,6 +174,9 @@ async def create_task_for(
         raise ValueError("Не указан идентификатор сделки")
     if mgr != "all":
         stmt = stmt.where(Deal.mgr.in_(mgr) if isinstance(mgr, list) else Deal.mgr == mgr)
+    entity_values = _values(legal_entity)
+    if entity_values:
+        stmt = stmt.where(Deal.legal_entity_key.in_(entity_values))
     deal = (await session.execute(stmt)).scalars().first()
     if deal is None:
         raise ValueError("Сделка не найдена")

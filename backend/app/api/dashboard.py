@@ -8,7 +8,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthUser, require_financial_access, require_session
+from app.api.deps import (
+    AuthUser,
+    require_financial_access,
+    require_session,
+    scoped_legal_entities,
+)
+from app.api.deps import (
+    scoped_manager as _scoped_manager,
+)
 from app.core.db import get_session
 from app.services import business_settings, metrics, plan_fact
 
@@ -17,33 +25,6 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depend
 # Все витрины дашборда принимают одни и те же фильтры панели: период, менеджер
 # и источник лида. Без mgr/source выпадающие списки не влияли ни на что, кроме
 # таблицы лидов, — дашборд выглядел «замороженным» при их переключении.
-
-
-async def _scoped_manager(
-    session: AsyncSession, user: AuthUser, requested: list[str]
-) -> str | list[str]:
-    """Накладывает область сотрудника/отдела поверх пользовательского фильтра."""
-    if user.role == "owner":
-        return requested or "all"
-    config = await business_settings.get_settings(session)
-    if user.role == "head":
-        names = [
-            str(item.get("name") or "") for item in config.get("employees", [])
-            if item.get("enabled", True)
-            and str(item.get("department_key") or "") == user.department_key
-            and item.get("name")
-        ]
-        if requested:
-            selected = [name for name in requested if name in names]
-            return selected or ["__no_access__"]
-        return names or ["__no_access__"]
-    employee = next(
-        (item for item in config.get("employees", [])
-         if str(item.get("key") or "") == user.employee_key),
-        None,
-    )
-    # Непривязанная учётная запись не должна случайно получить общий набор данных.
-    return str(employee.get("name") or "") if employee else "__no_access__"
 
 
 def _multi(values: list[str]) -> str | list[str]:
@@ -69,6 +50,10 @@ def _scope_plan_rows(
         ]
     if user.role != "head":
         return rows
+
+    if user.scope_mode == "legal_entities":
+        allowed = set(user.legal_entity_keys)
+        return [row for row in rows if str(row.get("legal_entity_key") or "") in allowed]
 
     department_rows = [
         row for row in rows
@@ -106,7 +91,8 @@ async def get_kpis(
 ) -> list[dict[str, Any]]:
     mgr = await _scoped_manager(session, user, mgr)
     rows = await metrics.kpis(
-        session, period, mgr=mgr, source=source, legal_entity=_multi(legal_entity),
+        session, period, mgr=mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel),
     )
     if user.role == "manager":
@@ -125,7 +111,8 @@ async def get_attention(
 ) -> dict[str, Any]:
     mgr = await _scoped_manager(session, user, mgr)
     result = await metrics.attention(
-        session, mgr=mgr, source=source, legal_entity=_multi(legal_entity),
+        session, mgr=mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel)
     )
     if user.role == "manager":
@@ -141,10 +128,15 @@ async def get_filters(
 ) -> dict[str, Any]:
     """Реальные опции фильтров (менеджеры/каналы/источники) из текущих данных."""
     result = await metrics.filter_options(session)
-    if user.role in {"manager", "head"}:
+    if user.role == "manager" or (user.role == "head" and user.scope_mode == "department"):
         own = await _scoped_manager(session, user, [])
         names = own if isinstance(own, list) else [own]
         result["managers"] = [name for name in names if name != "__no_access__"]
+    if user.role == "head" and user.scope_mode == "legal_entities":
+        allowed = set(user.legal_entity_keys)
+        result["legal_entities"] = [
+            item for item in result.get("legal_entities", []) if item.get("value") in allowed
+        ]
     return result
 
 
@@ -160,7 +152,8 @@ async def get_funnel(
 ) -> list[dict[str, Any]]:
     mgr = await _scoped_manager(session, user, mgr)
     return await metrics.funnel(
-        session, period, mgr=mgr, source=source, legal_entity=_multi(legal_entity),
+        session, period, mgr=mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel),
     )
 
@@ -177,7 +170,8 @@ async def get_sources(
 ) -> list[dict[str, Any]]:
     mgr = await _scoped_manager(session, user, mgr)
     return await metrics.sources(
-        session, period, mgr=mgr, source=source, legal_entity=_multi(legal_entity),
+        session, period, mgr=mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel),
     )
 
@@ -194,7 +188,8 @@ async def get_revenue_series(
 ) -> dict[str, Any]:
     scoped_mgr = await _scoped_manager(session, user, mgr)
     return await metrics.revenue_series(
-        session, period, mgr=scoped_mgr, source=source, legal_entity=_multi(legal_entity),
+        session, period, mgr=scoped_mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel),
     )
 
@@ -211,7 +206,8 @@ async def get_romi_by_channel(
 ) -> list[dict[str, Any]]:
     scoped_mgr = await _scoped_manager(session, user, mgr)
     return await metrics.romi_by_channel(
-        session, period, mgr=scoped_mgr, source=source, legal_entity=_multi(legal_entity),
+        session, period, mgr=scoped_mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel),
     )
 
@@ -222,9 +218,11 @@ async def get_expenses_by_article(
     legal_entity: list[str] = Query(default=[]),
     funnel: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
-    _: AuthUser = Depends(require_financial_access),
+    user: AuthUser = Depends(require_financial_access),
 ) -> list[dict[str, Any]]:
-    return await metrics.expenses_by_article(session, period, _multi(legal_entity))
+    return await metrics.expenses_by_article(
+        session, period, scoped_legal_entities(user, legal_entity)
+    )
 
 
 @router.get("/managers")
@@ -239,7 +237,8 @@ async def get_managers(
 ) -> list[dict[str, Any]]:
     mgr = await _scoped_manager(session, user, mgr)
     rows = await metrics.managers(
-        session, period, mgr=mgr, source=source, legal_entity=_multi(legal_entity),
+        session, period, mgr=mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel),
     )
     if user.role == "manager":
@@ -267,7 +266,7 @@ async def get_leads(
         "source": source,
         "risk": risk,
         "period": period,
-        "legal_entity": _multi(legal_entity),
+        "legal_entity": scoped_legal_entities(user, legal_entity),
         "funnel": _multi(funnel),
     }
     size = min(max(page_size, 10), 200)
@@ -305,7 +304,8 @@ async def get_departments(
         return []
     scoped_mgr = await _scoped_manager(session, user, mgr)
     return await metrics.departments(
-        session, period, mgr=scoped_mgr, source=source, legal_entity=_multi(legal_entity),
+        session, period, mgr=scoped_mgr, source=source,
+        legal_entity=scoped_legal_entities(user, legal_entity),
         funnel=_multi(funnel),
     )
 
@@ -323,7 +323,7 @@ async def get_plan_fact(
     selected_month = month or datetime.now(UTC).strftime("%Y-%m")
     try:
         result = await plan_fact.rows(
-            session, selected_month, legal_entity=_multi(legal_entity),
+            session, selected_month, legal_entity=scoped_legal_entities(user, legal_entity),
             funnel=_multi(funnel), source=source,
         )
         selected_managers = {value for value in mgr if value and value != "all"}

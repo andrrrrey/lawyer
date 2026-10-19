@@ -273,7 +273,7 @@ async def channels_table(
 
 
 async def _chart_channels(
-    session: AsyncSession, period: str, legal_entity: str
+    session: AsyncSession, period: str, legal_entity: FilterValue
 ) -> list[dict]:
     rebuilt = (
         await ch_svc.for_period(session, period, legal_entity=legal_entity)
@@ -297,7 +297,7 @@ async def _chart_channels(
 
 
 async def romi_channels_chart(
-    session: AsyncSession, period: str = "30", legal_entity: str = "all"
+    session: AsyncSession, period: str = "30", legal_entity: FilterValue = "all"
 ) -> list[dict]:
     """Данные для сравнения расхода и фактической выручки по каналам."""
     chs = await _chart_channels(session, period, legal_entity)
@@ -309,7 +309,7 @@ async def romi_channels_chart(
 
 
 async def campaigns_bubble(
-    session: AsyncSession, period: str = "30", legal_entity: str = "all"
+    session: AsyncSession, period: str = "30", legal_entity: FilterValue = "all"
 ) -> list[dict]:
     """Пузырьковая диаграмма эффективности кампаний (chart-bubble)."""
     chs = await _chart_channels(session, period, legal_entity)
@@ -328,14 +328,15 @@ async def campaigns_bubble(
 
 
 async def minus_words(
-    session: AsyncSession, period: str = "30", legal_entity: str = "all",
+    session: AsyncSession, period: str = "30", legal_entity: FilterValue = "all",
 ) -> dict:
     from datetime import UTC, datetime
 
     from app.services import period as period_service
     stmt = select(MinusWord).order_by(MinusWord.position)
-    if legal_entity and legal_entity != "all":
-        stmt = stmt.where(MinusWord.legal_entity_key == legal_entity)
+    legal_values = _values(legal_entity)
+    if legal_values:
+        stmt = stmt.where(MinusWord.legal_entity_key.in_(legal_values))
     start = period_service.start(period, datetime.now(UTC)).date()
     end_dt = period_service.end(period, datetime.now(UTC))
     stmt = stmt.where((MinusWord.date_to.is_(None)) | (MinusWord.date_to >= start))

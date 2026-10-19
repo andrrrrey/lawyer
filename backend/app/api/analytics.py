@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_financial_access
+from app.api.deps import AuthUser, require_financial_access, scoped_legal_entities
 from app.core.db import get_session
 from app.services import analytics
 
@@ -18,18 +18,16 @@ router = APIRouter(
 )
 
 
-def _multi(values: list[str]) -> str | list[str]:
-    """Пустой выбор означает все юрлица, иначе используется OR по ключам."""
-    return values or "all"
-
-
 @router.get("/chain")
 async def get_chain(
     period: str = "30",
     legal_entity: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(require_financial_access),
 ) -> list[dict[str, Any]]:
-    return await analytics.chain(session, period, legal_entity=_multi(legal_entity))
+    return await analytics.chain(
+        session, period, legal_entity=scoped_legal_entities(user, legal_entity)
+    )
 
 
 @router.get("/channels")
@@ -38,9 +36,11 @@ async def get_channels(
     period: str = "30",
     legal_entity: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(require_financial_access),
 ) -> list[dict[str, Any]]:
     return await analytics.channels_table(
-        session, channel=channel, period=period, legal_entity=_multi(legal_entity)
+        session, channel=channel, period=period,
+        legal_entity=scoped_legal_entities(user, legal_entity),
     )
 
 
@@ -49,7 +49,8 @@ async def get_reconciliation(
     period: str = "30",
     legal_entity: list[str] = Query(default=[]),
     session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(require_financial_access),
 ) -> dict[str, Any]:
     return await analytics.reconciliation(
-        session, period=period, legal_entity=_multi(legal_entity)
+        session, period=period, legal_entity=scoped_legal_entities(user, legal_entity)
     )

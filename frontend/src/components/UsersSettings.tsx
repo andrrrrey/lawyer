@@ -9,7 +9,8 @@ const ROLE_LABEL: Record<UserRole, string> = {
 };
 
 const emptyUser = (): AppUserPayload => ({
-  login: "", password: "", role: "manager", employee_key: "", department_key: "", enabled: true,
+  login: "", password: "", role: "manager", employee_key: "", department_key: "",
+  scope_mode: "department", legal_entity_keys: [], enabled: true,
 });
 
 export function UsersSettings({ settings }: { settings: BusinessSettings }) {
@@ -43,22 +44,25 @@ export function UsersSettings({ settings }: { settings: BusinessSettings }) {
         <Button type="primary" onClick={() => edit()}>Добавить пользователя</Button>
       </div>
       <div className="card-p">
-        <Alert type="info" showIcon style={{ marginBottom: 14 }} message="Основная учётная запись администратора всегда имеет роль собственника" description="Менеджер видит только свои сделки и не видит суммы, расходы и ROMI. Руководителю доступны рабочие и финансовые отчёты, но недоступны настройки и интеграции." />
+        <Alert type="info" showIcon style={{ marginBottom: 14 }} message="Основная учётная запись администратора всегда имеет роль собственника" description="Менеджер видит только свои сделки и не видит суммы, расходы и ROMI. Руководителю можно открыть свой отдел либо выбранные юрлица целиком; настройки и интеграции ему недоступны." />
         <Table<AppUserRow> rowKey="id" loading={query.isLoading} dataSource={query.data ?? []} pagination={false} columns={[
           { title: "Логин", dataIndex: "login" },
           { title: "Роль", dataIndex: "role", render: (value: UserRole) => <Tag>{ROLE_LABEL[value]}</Tag> },
           { title: "Сотрудник", dataIndex: "employee_key", render: (value: string) => settings.employees.find((x) => x.key === value)?.name ?? "—" },
           { title: "Отдел", dataIndex: "department_key", render: (value: string) => settings.departments.find((x) => x.key === value)?.name ?? "—" },
+          { title: "Область данных", render: (_, row) => row.role !== "head" ? "—" : row.scope_mode === "legal_entities" ? row.legal_entity_keys.map((key) => settings.legal_entities.find((x) => x.key === key)?.name ?? key).join(", ") : "Свой отдел" },
           { title: "Статус", dataIndex: "enabled", render: (value: boolean) => <Tag color={value ? "green" : "default"}>{value ? "Активен" : "Отключён"}</Tag> },
           { title: "", render: (_, row) => <div style={{ display: "flex", gap: 8 }}><Button size="small" onClick={() => edit(row)}>Изменить</Button><Popconfirm title="Удалить пользователя?" onConfirm={() => remove.mutateAsync(row.id)} okText="Удалить" cancelText="Отмена"><Button size="small" danger>Удалить</Button></Popconfirm></div> },
         ]} />
       </div>
-      <Modal title={editingId ? "Изменить пользователя" : "Новый пользователь"} open={open} confirmLoading={save.isPending} okText="Сохранить" cancelText="Отмена" onCancel={() => setOpen(false)} onOk={submit} okButtonProps={{ disabled: !draft.login.trim() || (!editingId && draft.password.length < 8) || (draft.role === "manager" && !draft.employee_key) || (draft.role === "head" && !draft.department_key) }}>
+      <Modal title={editingId ? "Изменить пользователя" : "Новый пользователь"} open={open} confirmLoading={save.isPending} okText="Сохранить" cancelText="Отмена" onCancel={() => setOpen(false)} onOk={submit} okButtonProps={{ disabled: !draft.login.trim() || (!editingId && draft.password.length < 8) || (draft.role === "manager" && !draft.employee_key) || (draft.role === "head" && draft.scope_mode === "department" && !draft.department_key) || (draft.role === "head" && draft.scope_mode === "legal_entities" && !draft.legal_entity_keys.length) }}>
         <div className="field"><label>Логин</label><Input value={draft.login} onChange={(e) => setDraft((x) => ({ ...x, login: e.target.value }))} /></div>
         <div className="field"><label>{editingId ? "Новый пароль (необязательно)" : "Пароль — минимум 8 символов"}</label><Input.Password value={draft.password} onChange={(e) => setDraft((x) => ({ ...x, password: e.target.value }))} /></div>
         <div className="field"><label>Роль</label><Select style={{ width: "100%" }} value={draft.role} options={Object.entries(ROLE_LABEL).map(([value, label]) => ({ value, label }))} onChange={(role: UserRole) => setDraft((x) => ({ ...x, role }))} /></div>
         {draft.role === "manager" ? <div className="field"><label>Сотрудник</label><Select allowClear style={{ width: "100%" }} value={draft.employee_key || undefined} options={settings.employees.filter((x) => x.enabled).map((x) => ({ value: x.key, label: x.name }))} onChange={(value) => setDraft((x) => ({ ...x, employee_key: value ?? "" }))} /></div> : null}
-        {draft.role === "head" ? <div className="field"><label>Отдел</label><Select allowClear style={{ width: "100%" }} value={draft.department_key || undefined} options={settings.departments.filter((x) => x.enabled).map((x) => ({ value: x.key, label: x.name }))} onChange={(value) => setDraft((x) => ({ ...x, department_key: value ?? "" }))} /></div> : null}
+        {draft.role === "head" ? <div className="field"><label>Область данных</label><Select style={{ width: "100%" }} value={draft.scope_mode} options={[{ value: "department", label: "Сотрудники своего отдела" }, { value: "legal_entities", label: "Юрлица целиком" }]} onChange={(scope_mode: "department" | "legal_entities") => setDraft((x) => ({ ...x, scope_mode }))} /></div> : null}
+        {draft.role === "head" && draft.scope_mode === "department" ? <div className="field"><label>Отдел</label><Select allowClear style={{ width: "100%" }} value={draft.department_key || undefined} options={settings.departments.filter((x) => x.enabled).map((x) => ({ value: x.key, label: x.name }))} onChange={(value) => setDraft((x) => ({ ...x, department_key: value ?? "" }))} /></div> : null}
+        {draft.role === "head" && draft.scope_mode === "legal_entities" ? <div className="field"><label>Доступные юридические лица</label><Select mode="multiple" allowClear style={{ width: "100%" }} value={draft.legal_entity_keys} options={settings.legal_entities.filter((x) => x.enabled).map((x) => ({ value: x.key, label: x.name }))} onChange={(legal_entity_keys) => setDraft((x) => ({ ...x, legal_entity_keys }))} /></div> : null}
         <div className="field"><label>Доступ разрешён</label><Switch checked={draft.enabled} onChange={(enabled) => setDraft((x) => ({ ...x, enabled }))} /></div>
       </Modal>
     </div>

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,8 @@ class UserResponse(BaseModel):
     role: str
     employee_key: str = ""
     department_key: str = ""
+    scope_mode: str = "department"
+    legal_entity_keys: list[str] = Field(default_factory=list)
 
 
 @router.post("/login", response_model=UserResponse)
@@ -55,6 +57,8 @@ async def login(
                 role=row.role,
                 employee_key=row.employee_key,
                 department_key=row.department_key,
+                scope_mode=row.scope_mode,
+                legal_entity_keys=row.legal_entity_keys or [],
             )
     if user is None:
         raise HTTPException(

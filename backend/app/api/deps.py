@@ -20,6 +20,8 @@ class AuthUser:
     role: str
     employee_key: str = ""
     department_key: str = ""
+    scope_mode: str = "department"
+    legal_entity_keys: tuple[str, ...] = ()
 
 
 async def require_session(
@@ -51,7 +53,55 @@ async def require_session(
     return AuthUser(
         login=row.login, role=row.role,
         employee_key=row.employee_key, department_key=row.department_key,
+        scope_mode=row.scope_mode,
+        legal_entity_keys=tuple(row.legal_entity_keys or []),
     )
+
+
+async def scoped_manager(
+    session: AsyncSession, user: AuthUser, requested: list[str] | None = None,
+) -> str | list[str]:
+    """Накладывает область сотрудника/отдела на выбранных менеджеров.
+
+    Руководитель с доступом по юрлицам не ограничивается списком сотрудников:
+    юридические лица ограничиваются отдельно функцией ``scoped_legal_entities``.
+    """
+    requested = requested or []
+    if user.role == "owner" or (user.role == "head" and user.scope_mode == "legal_entities"):
+        return requested or "all"
+    from app.services import business_settings
+
+    config = await business_settings.get_settings(session)
+    if user.role == "head":
+        names = [
+            str(item.get("name") or "") for item in config.get("employees", [])
+            if item.get("enabled", True)
+            and str(item.get("department_key") or "") == user.department_key
+            and item.get("name")
+        ]
+        if requested:
+            selected = [name for name in requested if name in names]
+            return selected or ["__no_access__"]
+        return names or ["__no_access__"]
+    employee = next(
+        (item for item in config.get("employees", [])
+         if str(item.get("key") or "") == user.employee_key),
+        None,
+    )
+    return str(employee.get("name") or "") if employee else "__no_access__"
+
+
+def scoped_legal_entities(user: AuthUser, requested: list[str]) -> str | list[str]:
+    """Ограничивает запрос разрешёнными руководителю юридическими лицами."""
+    if user.role != "head" or user.scope_mode != "legal_entities":
+        return requested or "all"
+    allowed = set(user.legal_entity_keys)
+    if not allowed:
+        return ["__no_access__"]
+    if not requested:
+        return sorted(allowed)
+    selected = [key for key in requested if key in allowed]
+    return selected or ["__no_access__"]
 
 
 async def require_owner(user: AuthUser = Depends(require_session)) -> AuthUser:

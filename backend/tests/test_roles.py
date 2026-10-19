@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 
 from app.api.dashboard import _scope_plan_rows
-from app.api.deps import AuthUser
+from app.api.deps import AuthUser, scoped_legal_entities
 from app.main import app
 
 
@@ -104,3 +104,20 @@ def test_head_sees_own_department_and_company_plans() -> None:
     visible = _scope_plan_rows(rows, user, config)
 
     assert [row["key"] for row in visible] == ["dept-u", "company-u", "company-c"]
+
+
+def test_legal_entity_head_sees_whole_entities() -> None:
+    user = AuthUser(
+        login="head", role="head", scope_mode="legal_entities",
+        legal_entity_keys=("urpase", "csv"),
+    )
+    rows = [
+        {"key": "u", "legal_entity_key": "urpase"},
+        {"key": "c", "legal_entity_key": "csv"},
+        {"key": "o", "legal_entity_key": "uo"},
+    ]
+
+    assert scoped_legal_entities(user, []) == ["csv", "urpase"]
+    assert scoped_legal_entities(user, ["urpase", "uo"]) == ["urpase"]
+    assert scoped_legal_entities(user, ["uo"]) == ["__no_access__"]
+    assert [row["key"] for row in _scope_plan_rows(rows, user, {})] == ["u", "c"]
