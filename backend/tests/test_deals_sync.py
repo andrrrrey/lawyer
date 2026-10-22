@@ -187,6 +187,19 @@ def test_sync_keeps_local_tasks(monkeypatch) -> None:
     with_db(check)
 
 
+def test_sync_marks_inactive_bitrix_user_as_archived(monkeypatch) -> None:
+    async def check(s: AsyncSession) -> None:
+        portal = FakeBitrix([_raw("100", title="Историческая сделка")])
+        portal.users = [{"id": "12", "name": "7T1", "active": False}]
+        monkeypatch.setattr(factory, "get_bitrix24", lambda: portal)
+
+        await ingest.refresh_deals(s)
+        deal = (await s.execute(select(Deal))).scalar_one()
+        assert deal.mgr == "7T1 (архивный)"
+
+    with_db(check)
+
+
 def test_sync_stage_history_and_activities_is_idempotent(monkeypatch) -> None:
     """История/контакты сохраняются один раз и формируют фактические SLA-даты."""
     async def check(s: AsyncSession) -> None:

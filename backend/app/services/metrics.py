@@ -667,7 +667,11 @@ async def filter_options(session: AsyncSession) -> dict:
         if item.get("enabled", True)
     ]
     return {
-        "managers": sorted({m for m in mgrs if m}),
+        # Отключённые пользователи остаются в исторических сделках и общих
+        # показателях, но не смешиваются с действующими менеджерами в фильтре.
+        "managers": sorted({
+            m for m in mgrs if m and not m.endswith(" (архивный)")
+        }),
         "channels": list(chans),
         "sources": sorted({s for s in srcs if s}),
         "legal_entities": entities,

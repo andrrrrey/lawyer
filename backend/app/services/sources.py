@@ -57,6 +57,8 @@ _ALIASES: dict[str, str] = {
     "rc_generator": "Другое",
 }
 
+_DELETED_SOURCE_PREFIX = "Удалённый источник #"
+
 
 def canonical_source(raw: str | None) -> str:
     """Каноничное название источника по сырому значению.
@@ -69,6 +71,12 @@ def canonical_source(raw: str | None) -> str:
     value = raw.strip()
     if not value:
         return "—"
+    # Числовой SOURCE_ID без записи в актуальном справочнике Bitrix24 — это
+    # исторический источник, который на портале уже удалён. Не показываем
+    # пользователю голый технический код, но сохраняем его в подписи, чтобы
+    # источник можно было однозначно сопоставить вручную.
+    if value.isdigit():
+        return f"{_DELETED_SOURCE_PREFIX}{value}"
     return _ALIASES.get(value.lower(), value)
 
 

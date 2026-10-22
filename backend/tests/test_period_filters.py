@@ -688,11 +688,20 @@ def test_filter_options_hide_uncountable_sources() -> None:
             status_label="В работе", status_class="st-mid", stage="В работе",
             amount=0, created_at=NOW,
         ))
+        # Архивный пользователь остаётся в исторических сделках, но не должен
+        # выглядеть как действующий менеджер в фильтре.
+        s.add(Deal(
+            position=92, on_dashboard=True, ref="archived-1", external_id="92",
+            name="Архивная сделка", src="Сайт", mgr="7T1 (архивный)",
+            status_label="В работе", status_class="st-mid", stage="В работе",
+            amount=0, created_at=NOW,
+        ))
         await s.commit()
 
         opts = await metrics.filter_options(s)
         assert "cpc" not in opts["sources"]
         assert "partner" not in opts["sources"]
+        assert "7T1 (архивный)" not in opts["managers"]
         # Обычные источники сидов остаются доступны.
         assert {"Сайт", "Звонок"} <= set(opts["sources"])
 

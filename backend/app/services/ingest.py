@@ -825,7 +825,13 @@ async def _bitrix_dictionaries(
     sources: dict[str, str] = {}
     phones: dict[str, str] = {}
     try:
-        users = {u["id"]: u["name"] for u in b24.fetch_users()}
+        users = {
+            str(u["id"]): (
+                f"{u['name']} (архивный)" if u.get("active") is False else str(u["name"])
+            )
+            for u in b24.fetch_users()
+            if u.get("id") is not None and u.get("name")
+        }
     except Exception as exc:  # noqa: BLE001 — имена необязательны
         logger.warning("Битрикс24: справочник сотрудников недоступен: %s", exc)
     # Ручное соответствие из настроек перекрывает справочник портала: так ФИО
@@ -875,6 +881,32 @@ async def _refresh_saved_manager_names(
                 Deal.mgr != name,
             )
             .values(mgr=name)
+        )
+        changed += int(result.rowcount or 0)
+    return changed
+
+
+async def _refresh_saved_source_names(
+    session: AsyncSession, source_key: str, sources: dict[str, str]
+) -> int:
+    """Заменяет сохранённые SOURCE_ID актуальными названиями из Bitrix24.
+
+    Частичная сверка получает только изменённые карточки, поэтому без отдельного
+    прохода старые строки продолжали показывать «9» даже после появления в
+    справочнике названия «ООО Полезный звонок».
+    """
+    changed = 0
+    for source_id, name in sources.items():
+        readable = src_svc.canonical_source(name)
+        if not source_id or not readable or source_id == readable:
+            continue
+        result = await session.execute(
+            update(Deal)
+            .where(
+                Deal.crm_source == source_key,
+                Deal.src == str(source_id),
+            )
+            .values(src=readable)
         )
         changed += int(result.rowcount or 0)
     return changed
@@ -1020,6 +1052,7 @@ async def refresh_deals(
             manual_users=business.employee_names_for_source(business_config, source_key),
         )
         await _refresh_saved_manager_names(session, source_key, dictionaries[0])
+        await _refresh_saved_source_names(session, source_key, dictionaries[2])
         raw_deals = [item for item in raw if item.get("entity_type", "deal") == "deal"]
         action_check_ids = {
             str(item.get("external_id")) for item in raw_deals if item.get("external_id")

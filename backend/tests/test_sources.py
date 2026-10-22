@@ -13,6 +13,7 @@ from sqlalchemy.pool import NullPool
 import app.models  # noqa: F401 — регистрирует таблицы
 from app.core.db import Base
 from app.models import Deal
+from app.services import ingest
 from app.services import sources as src_svc
 
 DB_PATH = pathlib.Path(tempfile.gettempdir()) / "lawyer_sources_test.db"
@@ -34,10 +35,15 @@ def test_canonical_source_keeps_readable_names() -> None:
     assert src_svc.canonical_source("") == "—"
 
 
-def _deal(pos: int, src: str) -> Deal:
+def test_canonical_source_labels_deleted_numeric_ids() -> None:
+    assert src_svc.canonical_source("15") == "Удалённый источник #15"
+    assert src_svc.canonical_source(" 16 ") == "Удалённый источник #16"
+
+
+def _deal(pos: int, src: str, *, crm_source: str = "primary") -> Deal:
     return Deal(
         position=pos, on_dashboard=True, ref=f"#{pos}", external_id=str(pos),
-        name=f"Сделка {pos}", src=src, mgr="Иванов",
+        name=f"Сделка {pos}", src=src, mgr="Иванов", crm_source=crm_source,
         status_label="В работе", status_class="st-mid", stage="В работе", amount=0,
     )
 
@@ -70,6 +76,45 @@ def test_normalize_existing_merges_codes_into_names() -> None:
 
                 # Идемпотентно: повторный проход ничего не меняет.
                 assert await src_svc.normalize_existing(s) == 0
+        finally:
+            await engine.dispose()
+            if DB_PATH.exists():
+                DB_PATH.unlink()
+
+    asyncio.run(run())
+
+
+def test_refresh_saved_source_names_resolves_current_bitrix_code() -> None:
+    """Действующий SOURCE_ID обновляется без полной перезагрузки сделок."""
+    async def run() -> None:
+        if DB_PATH.exists():
+            DB_PATH.unlink()
+        engine = create_async_engine(f"sqlite+aiosqlite:///{DB_PATH}", poolclass=NullPool)
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            async with maker() as s:
+                s.add_all([
+                    _deal(1, "9", crm_source="cloud"),
+                    _deal(2, "15", crm_source="cloud"),
+                    _deal(3, "9", crm_source="box"),
+                ])
+                await s.commit()
+
+                changed = await ingest._refresh_saved_source_names(
+                    s, "cloud", {"9": "ООО Полезный звонок"}
+                )
+                await s.commit()
+                assert changed == 1
+                values = (await s.execute(
+                    select(Deal.crm_source, Deal.src).order_by(Deal.position)
+                )).all()
+                assert values == [
+                    ("cloud", "ООО Полезный звонок"),
+                    ("cloud", "15"),
+                    ("box", "9"),
+                ]
         finally:
             await engine.dispose()
             if DB_PATH.exists():
